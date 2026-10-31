@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#b88fb7"/>
+  <path d="M104 330c17-63 33-140 53-140 24 0 9 131 27 131 16 0 53-178 80-178 24 0 3 177 24 177 16 0 28-49 53-49 20 0 21 30 43 30 13 0 23-9 34-23" fill="none" stroke="#542640" stroke-linecap="round" stroke-linejoin="round" stroke-width="20"/>
+  <path d="m107 117 8 23 23 8-23 8-8 23-8-23-23-8 23-8 8-23Zm300 202 7 20 20 7-20 7-7 20-7-20-20-7 20-7 7-20Z" fill="#542640"/>
+  <text x="256" y="405" fill="#542640" font-family="Georgia,serif" font-size="32" letter-spacing="9" text-anchor="middle">MADU</text>
+</svg>
