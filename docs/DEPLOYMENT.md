@@ -22,6 +22,7 @@
    ```
 
 3. Configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` (ou `VITE_SUPABASE_ANON_KEY`) no ambiente que executará o build. `VITE_WHATSAPP_NUMBER` é opcional e serve somente como fallback se a configuração persistida ainda não existir. O Firebase Hosting não injeta variáveis no frontend; localmente, use `.env.production.local`, que não deve ser commitado.
+   Antes da compilação, `scripts/check-supabase-config.mjs` bloqueia placeholders e builds sem configuração pública válida. Nunca configure `service_role` como variável `VITE_*`.
 4. Gere o build e publique somente o Hosting:
 
    ```bash

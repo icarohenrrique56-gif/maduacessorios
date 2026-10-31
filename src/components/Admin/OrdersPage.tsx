@@ -28,6 +28,11 @@ const statusLabels: Record<OrderStatus, string> = {
   cancelled: 'Cancelado',
 };
 
+function getOrderStatusLabel(order: Order) {
+  if (order.returned_at) return 'Venda estornada';
+  return statusLabels[order.status];
+}
+
 export function OrdersPage() {
   const { whatsappNumber } = useStoreSettings();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -117,7 +122,7 @@ export function OrdersPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="font-semibold text-[#2d1d25]">{order.number}</p>
-                        <span className="rounded-full bg-[#f8e9ef] px-2.5 py-1 text-xs text-[#76506a]">{statusLabels[order.status]}</span>
+                        <span className="rounded-full bg-[#f8e9ef] px-2.5 py-1 text-xs text-[#76506a]">{getOrderStatusLabel(order)}</span>
                       </div>
                       <p className="mt-1 truncate text-sm text-[#5d4454]">{firstItem?.name ?? 'Pedido sem itens'}</p>
                       <div className="mt-2 flex justify-between text-xs text-[#76506a]">
@@ -138,7 +143,7 @@ export function OrdersPage() {
             ) : (
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-[#8B5E7C]">{selected.number}</p>
-                <h2 className="mt-1 text-lg font-semibold text-[#2d1d25]">{statusLabels[selected.status]}</h2>
+                <h2 className="mt-1 text-lg font-semibold text-[#2d1d25]">{getOrderStatusLabel(selected)}</h2>
                 <div className="mt-4 space-y-3">
                   {(itemsByOrder[selected.id] ?? []).map((item) => (
                     <div key={item.id} className="flex gap-3 border-b border-[#f1dfe9] pb-3">

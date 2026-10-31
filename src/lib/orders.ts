@@ -111,3 +111,20 @@ export async function getStockMovements(): Promise<Array<StockMovement & { produ
   if (error) throw new Error(error.message);
   return data ?? [];
 }
+
+export async function recordQuickSale(input: {
+  productId: string;
+  variation?: string;
+  quantity: number;
+  idempotencyKey: string;
+}) {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const { data, error } = await supabase.rpc('quick_sale_stock_movement', {
+    p_product_id: input.productId,
+    p_variation: input.variation ?? null,
+    p_quantity: input.quantity,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) throw new Error(error.message);
+  return data as { id: string; quantity_before: number; quantity_after: number; idempotent: boolean };
+}

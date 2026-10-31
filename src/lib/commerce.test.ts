@@ -72,6 +72,9 @@ describe('commerce helpers', () => {
     expect(message).toContain('PEDIDO MADU');
     expect(message).toContain('Código: BRI-001');
     expect(message).toContain('Quantidade: 01');
+    expect(message).toContain('Valor unitário: R$ 9,90');
+    expect(message).toContain('Subtotal do item: 1 × R$ 9,90 = R$ 9,90');
+    expect(message).toContain('TOTAL: R$ 9,90');
     expect(message).toContain('Link: https://madu.test/produto/brinco-argola-dourado');
   });
 
@@ -93,6 +96,21 @@ describe('commerce helpers', () => {
     expect(message).toContain('Brinco de teste');
     expect(message).toContain('Quantidade: 02');
     expect(message).toContain('Total R$ 9,90');
+  });
+
+  it('calculates the WhatsApp template total from item quantities even when subtotal is zero', () => {
+    const message = buildOrderWhatsAppMessage({
+      orderNumber: 'MADU-TOTAL-TEST',
+      subtotal: 0,
+      template: 'Pedido {order_number}\n{items}\nTOTAL: {subtotal}',
+      items: [
+        { id: 'p1', name: 'Braceletes', quantity: 1, unitPrice: 2800 },
+        { id: 'p2', name: 'Brinco rosa', quantity: 1, unitPrice: 1800 },
+      ],
+    });
+
+    expect(message).toContain('TOTAL: R$ 46,00');
+    expect(message).not.toContain('TOTAL: R$ 0,00');
   });
 
   it('downloads one real product photograph as a shareable File and reuses the cache', async () => {

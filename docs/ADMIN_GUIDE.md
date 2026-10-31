@@ -11,8 +11,12 @@
 - Alterar preço e promoção.
 - Configurar categorias.
 - Revisar carrinho e WhatsApp.
+- Confirmar pedidos do WhatsApp somente após combinar a disponibilidade; a confirmação baixa o estoque.
+- Cancelar pedidos pendentes sem movimentar estoque.
+- Estornar vendas confirmadas informando um motivo; o saldo é devolvido uma única vez.
+- Registrar vendas rápidas na tela de Estoque, escolhendo produto, variação opcional e quantidade.
 - Ajustar identidade visual e textos do storefront.
 
 ## Segurança
 - Nenhuma chave privada deve ser exposta no front-end.
-- A autenticação administrativa deve ser implementada em Supabase no próximo ciclo de desenvolvimento.
+- Painel e operações de estoque exigem sessão administrativa do Supabase com perfil `admin` ativo.

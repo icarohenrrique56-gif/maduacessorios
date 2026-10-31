@@ -95,12 +95,18 @@ export function buildOrderWhatsAppMessage({
   subtotal: number;
   template?: string;
 }) {
+  const calculatedSubtotal = getCartSummary(items.map((item) => ({
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+  }))).subtotal;
   const itemLines = items.flatMap((item) => [
     '🛍️ SEU PRODUTO',
     '',
     item.name ?? 'Produto',
     `Quantidade: ${String(item.quantity).padStart(2, '0')}`,
-    `Valor: ${formatCurrency(item.unitPrice)}`,
+    `Valor unitário: ${formatCurrency(item.unitPrice)}`,
+    `Subtotal do item: ${item.quantity} × ${formatCurrency(item.unitPrice)} = ${formatCurrency(item.quantity * item.unitPrice)}`,
+    ...(item.variation ? [`Variação: ${item.variation}`] : []),
     ...(item.sku ? [`Código: ${item.sku}`] : []),
     ...(item.link ? [`Link: ${item.link}`] : []),
     '',
@@ -116,7 +122,7 @@ export function buildOrderWhatsAppMessage({
     ...itemLines,
     '🧾 RESUMO',
     '',
-    `TOTAL: ${formatCurrency(subtotal)}`,
+    `TOTAL: ${formatCurrency(calculatedSubtotal || subtotal)}`,
     '',
     '━━━━━━━━━━━━━━',
     '',
@@ -127,14 +133,16 @@ export function buildOrderWhatsAppMessage({
   const itemBlock = items.map((item) => [
     item.name ?? 'Produto',
     `Quantidade: ${String(item.quantity).padStart(2, '0')}`,
-    `Valor: ${formatCurrency(item.unitPrice)}`,
+    `Valor unitário: ${formatCurrency(item.unitPrice)}`,
+    `Subtotal: ${item.quantity} × ${formatCurrency(item.unitPrice)} = ${formatCurrency(item.quantity * item.unitPrice)}`,
+    ...(item.variation ? [`Variação: ${item.variation}`] : []),
     ...(item.sku ? [`Código: ${item.sku}`] : []),
     ...(item.link ? [`Link: ${item.link}`] : []),
   ].join('\n')).join('\n\n━━━━━━━━━━━━━━\n\n');
   const selectedTemplate = template?.trim() || defaultTemplate;
   return selectedTemplate
     .split('{order_number}').join(orderNumber)
-    .split('{subtotal}').join(formatCurrency(subtotal))
+    .split('{subtotal}').join(formatCurrency(calculatedSubtotal || subtotal))
     .split('{items}').join(itemBlock);
 }
 

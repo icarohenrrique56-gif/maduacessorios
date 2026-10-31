@@ -124,7 +124,7 @@ describe('Supabase product persistence', () => {
 
     expect(result).toEqual({ ok: true, product: { ...product, name: 'Argola atualizada' } });
     expect(mocks.neq).toHaveBeenCalledWith('id', product.id);
-    expect(mocks.update).toHaveBeenCalledWith({
+    const { stock: _stock, ...productWithoutStock } = {
       ...product,
       name: 'Argola atualizada',
       sale_price_cents: 119990,
@@ -135,7 +135,8 @@ describe('Supabase product persistence', () => {
       characteristics: null,
       care: null,
       warranty: null,
-    });
+    };
+    expect(mocks.update).toHaveBeenCalledWith(productWithoutStock);
   });
 
   it('removes a product only after the database confirms its deletion', async () => {

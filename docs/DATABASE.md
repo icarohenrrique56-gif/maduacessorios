@@ -7,8 +7,8 @@ O schema e as migrations criam as estruturas abaixo sem apagar dados existentes:
 - `products` — catálogo, incluindo preço, estoque, URL pública da imagem e `is_active`.
 - `categories` — categorias iniciais; o app ainda usa a lista local para filtros e formulário.
 - `customers` — perfil opcional associado a uma conta Auth.
-- `orders` e `order_items` — estruturas futuras; o checkout atual envia o cliente ao WhatsApp e não grava pedidos.
-- `inventory_movements` — estrutura futura; o app lê somente o saldo atual em `products.stock`.
+- `orders` e `order_items` — pedidos iniciados pelo WhatsApp, sempre pendentes até confirmação administrativa.
+- `stock_movements` — entradas, vendas, estornos e ajustes ligados ao saldo de `products.stock`.
 - `store_settings` — configurações persistidas na linha `id = 'main'`; o WhatsApp fica em `whatsapp_number`, junto de `store_name` e `instagram_url`.
 - `admin_user_permissions` — perfil `admin` vinculado ao `user_id` Auth; o e-mail é informativo. Acesso exige `is_active = true` e `status = 'active'`.
 
@@ -26,4 +26,4 @@ A Edge Function `admin-users` verifica o JWT com Auth e consulta o perfil persis
 
 O script [schema.sql](../supabase/schema.sql) é uma referência aditiva; ele não migra automaticamente tabelas com formatos diferentes. Faça backup, confira o esquema atual, resolva SKUs duplicados antes do índice único e revise `pg_policies`. Policies permissivas são combinadas por `OR`; uma policy legada pode manter acesso. Não desative RLS.
 
-O projeto atualiza o WhatsApp e o catálogo ativo, mas não integra persistência de categorias, clientes, pedidos, pagamentos ou movimentos de estoque. Uma tabela vazia não é um dado de negócio real. Consulte [ADMIN_SETUP.md](./ADMIN_SETUP.md) antes de aplicar migrations ou publicar Edge Functions.
+Pedidos são criados apenas após o cliente iniciar explicitamente a finalização pelo WhatsApp. O pedido não reserva estoque; confirmação administrativa aplica a baixa agregada por produto. Estorno exige motivo e é protegido contra repetição. A RPC `quick_sale_stock_movement` exige administrador, valida saldo e usa chave idempotente para vendas rápidas.

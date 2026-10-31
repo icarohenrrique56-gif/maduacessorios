@@ -133,7 +133,7 @@ export async function uploadProductImage(
 
 export async function getProductsFromSupabase(includeInactive = false): Promise<Product[]> {
   if (!supabase) {
-    return [];
+    throw new Error('Supabase não configurado. Configure a URL e uma chave pública antes do build.');
   }
 
   let query = supabase.from('products').select('*');
@@ -195,9 +195,11 @@ export async function updateProductInSupabase(
   const skuError = await findDuplicateSku(product, product.id);
   if (skuError) return { ok: false, reason: skuError };
 
+  const payload = { ...productPayload(product) };
+  delete (payload as { stock?: number }).stock;
   const { data, error } = await supabase
     .from('products')
-    .update(productPayload(product))
+    .update(payload)
     .eq('id', product.id)
     .select('*')
     .single();

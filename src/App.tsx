@@ -72,6 +72,10 @@ function useStorefrontProducts(includeInactive = false) {
     setIsLoading(true);
     setLoadError(false);
     try {
+      const status = getSupabaseStatus();
+      if (!status.enabled) {
+        throw new Error(status.message);
+      }
       const remoteProducts = await getProductsFromSupabase(includeInactive);
       setCatalog(remoteProducts);
       setSyncStatus(getSupabaseStatus().message);
@@ -109,16 +113,16 @@ function useStorefrontProducts(includeInactive = false) {
 }
 
 function useCatalogCategories() {
-  const [categories, setCategories] = useState<string[]>(() => defaultCategories.map((category) => category.name));
+  const [categories, setCategories] = useState<string[]>([]);
 
   const refreshCategories = useCallback(async () => {
     try {
       const remote = await getCategoriesFromSupabase(true);
       const names = remote.map((category) => category.name);
-      setCategories(names.length > 0 ? names : defaultCategories.map((category) => category.name));
+      setCategories(names);
       return remote;
     } catch {
-      setCategories(defaultCategories.map((category) => category.name));
+      setCategories([]);
       return [] as Category[];
     }
   }, []);
@@ -175,6 +179,14 @@ function HomePage() {
   const featured = catalog.filter((product) => product.featured).slice(0, 6);
   const homeProducts = featured.length > 0 ? featured : catalog.slice(0, 6);
   const heroProduct = homeProducts.find((product) => product.image) ?? null;
+  const realCategories = categories.length > 0
+    ? categories
+    : [...new Set(catalog.map((product) => product.category).filter(Boolean))];
+  const promotions = catalog.filter((product) =>
+    product.is_active !== false &&
+    product.sale_price_cents !== undefined &&
+    product.sale_price_cents < product.price_cents,
+  ).slice(0, 6);
 
   return (
     <>
@@ -234,13 +246,28 @@ function HomePage() {
             <Link to="/produtos" className="text-sm font-medium text-[#8B5E7C]">Ver tudo</Link>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {categories.slice(0, 6).map((category) => (
+            {realCategories.slice(0, 6).map((category) => (
               <Link key={category} to={`/produtos?categoria=${encodeURIComponent(category)}&disponivel=1`} className="rounded-2xl border border-[#e9abc8] bg-white p-3 text-center shadow-sm transition hover:border-[#8B5E7C] hover:bg-[#fffafc]">
                 <p className="text-sm font-medium text-[#3d2b35]">{category}</p>
               </Link>
             ))}
           </div>
         </section>
+
+        {promotions.length > 0 && (
+          <section className="mt-10">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8B5E7C]">Preço especial</p>
+                <h2 className="mt-1 text-xl font-semibold text-[#2d1d25]">Ofertas da Madu</h2>
+              </div>
+              <Link to="/produtos?ordenar=desconto" className="text-sm font-medium text-[#8B5E7C]">Ver ofertas</Link>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:gap-5 md:grid-cols-3">
+              {promotions.slice(0, 3).map((product) => <ProductCard key={product.id} product={product} />)}
+            </div>
+          </section>
+        )}
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
@@ -276,13 +303,22 @@ function HomePage() {
 }
 
 function CatalogPage() {
-  const { catalog, isLoading, loadError } = useStorefrontProducts();
+  const { catalog, isLoading, loadError, syncStatus } = useStorefrontProducts();
   const { categories } = useCatalogCategories();
   const [searchParams] = useSearchParams();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') ?? '');
   const [category, setCategory] = useState(searchParams.get('categoria') ?? 'Todas');
-  const [sort, setSort] = useState('news');
+  const [sort, setSort] = useState(searchParams.get('ordenar') ?? 'news');
   const [availableOnly, setAvailableOnly] = useState(searchParams.get('disponivel') === '1');
+  const [variation, setVariation] = useState('Todas');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const realCategories = categories.length > 0
+    ? categories
+    : [...new Set(catalog.map((product) => product.category).filter(Boolean))];
+  const realVariations = useMemo(() =>
+    [...new Set(catalog.flatMap((product) => product.variations ?? []).filter(Boolean))],
+  [catalog]);
 
   const filteredProducts = useMemo(() => {
     const byText = catalog.filter((product) => {
@@ -296,14 +332,26 @@ function CatalogPage() {
     });
 
     const byCategory = category === 'Todas' ? byText : byText.filter((product) => product.category === category);
-    const byAvailability = availableOnly ? byCategory.filter((product) => product.stock > 0) : byCategory;
+    const byVariation = variation === 'Todas' ? byCategory : byCategory.filter((product) => product.variations?.includes(variation));
+    const byAvailability = availableOnly ? byVariation.filter((product) => product.stock > 0) : byVariation;
+    const min = minPrice.trim() ? Number(minPrice) * 100 : 0;
+    const max = maxPrice.trim() ? Number(maxPrice) * 100 : Number.POSITIVE_INFINITY;
+    const byPrice = byAvailability.filter((product) => {
+      const price = product.sale_price_cents ?? product.price_cents;
+      return Number.isFinite(price) && price >= min && price <= max;
+    });
 
-    return [...byAvailability].sort((a, b) => {
+    return [...byPrice].sort((a, b) => {
       if (sort === 'low') return (a.sale_price_cents ?? a.price_cents) - (b.sale_price_cents ?? b.price_cents);
       if (sort === 'high') return (b.sale_price_cents ?? b.price_cents) - (a.sale_price_cents ?? a.price_cents);
+      if (sort === 'discount') {
+        const discountA = a.sale_price_cents !== undefined ? a.price_cents - a.sale_price_cents : 0;
+        const discountB = b.sale_price_cents !== undefined ? b.price_cents - b.sale_price_cents : 0;
+        return discountB - discountA;
+      }
       return Number(b.featured === true) - Number(a.featured === true);
     });
-  }, [catalog, search, category, sort, availableOnly]);
+  }, [catalog, search, category, sort, availableOnly, variation, minPrice, maxPrice]);
 
   useEffect(() => {
     if (!search.trim()) return;
@@ -323,26 +371,39 @@ function CatalogPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nome ou código..."
+              placeholder="Buscar por nome, descrição ou SKU..."
               className="w-full rounded-full border border-[#efd7e7] bg-[#fffafc] py-3 pl-10 pr-4 text-sm outline-none ring-0 placeholder:text-[#9c7d8d]"
             />
           </div>
-          <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:items-center">
+          <div className="grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-[minmax(110px,1fr)_minmax(110px,1fr)_minmax(110px,1fr)_auto]">
             <select value={category} onChange={(event) => setCategory(event.target.value)} className="min-w-0 w-full rounded-full border border-[#efd7e7] bg-[#fffafc] px-3 py-2 text-sm text-[#3d2b35] outline-none">
               <option value="Todas">Todas</option>
-              {categories.map((item) => (
+              {realCategories.map((item) => (
                 <option key={item} value={item}>{item}</option>
               ))}
             </select>
+            {realVariations.length > 0 && (
+              <select value={variation} onChange={(event) => setVariation(event.target.value)} className="min-w-0 w-full rounded-full border border-[#efd7e7] bg-[#fffafc] px-3 py-2 text-sm text-[#3d2b35] outline-none">
+                <option value="Todas">Todas as variações</option>
+                {realVariations.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+            )}
             <select value={sort} onChange={(event) => setSort(event.target.value)} className="min-w-0 w-full rounded-full border border-[#efd7e7] bg-[#fffafc] px-3 py-2 text-sm text-[#3d2b35] outline-none">
               <option value="news">Novidades</option>
               <option value="low">Menor preço</option>
               <option value="high">Maior preço</option>
+              <option value="discount">Maior desconto</option>
             </select>
             <label className="col-span-2 inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#efd7e7] bg-[#fffafc] px-3 text-sm text-[#5d4454] sm:col-span-1">
               <input type="checkbox" checked={availableOnly} onChange={(event) => setAvailableOnly(event.target.checked)} className="accent-[#8B5E7C]" />
               Disponíveis
             </label>
+          </div>
+          <div className="grid grid-cols-2 gap-2 border-t border-[#f4e8ee] pt-3 sm:max-w-md sm:self-end">
+            <input type="number" min="0" step="1" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} placeholder="Preço mín." aria-label="Preço mínimo" className="w-full rounded-full border border-[#efd7e7] bg-[#fffafc] px-3 py-2 text-sm text-[#3d2b35]" />
+            <input type="number" min="0" step="1" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} placeholder="Preço máx." aria-label="Preço máximo" className="w-full rounded-full border border-[#efd7e7] bg-[#fffafc] px-3 py-2 text-sm text-[#3d2b35]" />
           </div>
         </div>
 
@@ -351,14 +412,14 @@ function CatalogPage() {
             Array.from({ length: 6 }, (_, index) => <ProductCardSkeleton key={index} />)
           ) : loadError ? (
             <p role="alert" className="col-span-full rounded-3xl border border-rose-200 bg-white p-8 text-center text-[#5d4454]">
-              Não foi possível carregar o catálogo. Verifique sua conexão e tente novamente.
+              {syncStatus || 'Não foi possível carregar o catálogo. Verifique sua conexão e tente novamente.'}
             </p>
           ) : filteredProducts.length > 0 ? (
             filteredProducts.map((product) => <ProductCard key={product.id} product={product} />)
           ) : (
             <div className="col-span-full rounded-3xl border border-dashed border-[#d7b0c0] bg-white p-8 text-center text-[#5d4454]">
               <p>Nenhum produto encontrado com esses filtros.</p>
-              <button type="button" onClick={() => { setSearch(''); setCategory('Todas'); setAvailableOnly(false); setSort('news'); }} className="mt-4 min-h-11 rounded-full bg-[#8B5E7C] px-5 text-sm font-medium text-white">
+              <button type="button" onClick={() => { setSearch(''); setCategory('Todas'); setAvailableOnly(false); setSort('news'); setVariation('Todas'); setMinPrice(''); setMaxPrice(''); }} className="mt-4 min-h-11 rounded-full bg-[#8B5E7C] px-5 text-sm font-medium text-white">
                 Limpar filtros
               </button>
             </div>
@@ -387,7 +448,12 @@ function ProductPage() {
     if (product) void trackStorefrontEvent('product_view', { productId: product.id });
   }, [product?.id]);
 
-  const related = product ? catalog.filter((item) => item.id !== product.id).slice(0, 3) : [];
+  const related = product
+    ? catalog
+        .filter((item) => item.id !== product.id && item.category === product.category)
+        .concat(catalog.filter((item) => item.id !== product.id && item.category !== product.category))
+        .slice(0, 3)
+    : [];
 
   if (!product && isLoading) {
     return (
@@ -435,7 +501,12 @@ function ProductPage() {
           </div>
 
           <div className="flex flex-col justify-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8B5E7C]">{product.category}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8B5E7C]">{product.category}</p>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${product.stock > 0 ? 'bg-[#edf2e8] text-[#5f7049]' : 'bg-[#f7e8ec] text-[#955a69]'}`}>
+                {product.stock > 0 ? `${product.stock} disponíveis` : 'Esgotado'}
+              </span>
+            </div>
             <h1 className="mt-3 text-3xl font-semibold text-[#2d1d25]">{product.name}</h1>
             <div className="mt-4 flex items-center gap-2 text-[#8B5E7C]">
               <Star size={16} className="fill-current" />
@@ -594,45 +665,19 @@ function CartPage() {
     [cartItems],
   );
 
-  useEffect(() => {
-    if (!orderSignature || orderSignature === '[]') return;
-    if (idempotencySignatureRef.current !== orderSignature) {
-      idempotencySignatureRef.current = orderSignature;
-      idempotencyKeyRef.current = typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      pendingOrderRef.current = null;
-      pendingOrderPromiseRef.current = null;
-    }
-
-    if (!canCheckout || pendingOrderPromiseRef.current) return;
-
-    performance.mark('madu:order-record-start');
-    const preparation = createWhatsAppOrder({
-      items: cartItems.map((item) => ({
-        product_id: item.id,
-        quantity: item.quantity,
-        variation: item.variation,
-      })),
-      idempotencyKey: idempotencyKeyRef.current,
-    });
-    pendingOrderPromiseRef.current = preparation;
-    void preparation
-      .then((order) => {
-        pendingOrderRef.current = order;
-        performance.measure('madu:order-record', 'madu:order-record-start');
-      })
-      .catch(() => {
-        pendingOrderPromiseRef.current = null;
-        performance.measure('madu:order-record-failed', 'madu:order-record-start');
-      });
-  }, [canCheckout, cartItems, orderSignature]);
-
   async function handleStartWhatsAppOrder() {
     if (!canCheckout || isCheckoutStarting) return;
     setIsCheckoutStarting(true);
     setCheckoutError('');
     try {
+      if (idempotencySignatureRef.current !== orderSignature) {
+        idempotencySignatureRef.current = orderSignature;
+        idempotencyKeyRef.current = typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        pendingOrderRef.current = null;
+        pendingOrderPromiseRef.current = null;
+      }
       const orderItems = cartItems.map((item) => ({
         id: item.id,
         quantity: item.quantity,
@@ -1775,10 +1820,24 @@ function AdminModulePage() {
 }
 
 function ProductCard({ product }: { product: ProductView }) {
+  const discountPercentage = product.sale_price_cents !== undefined && product.sale_price_cents < product.price_cents
+    ? Math.round((1 - product.sale_price_cents / product.price_cents) * 100)
+    : 0;
+
   return (
     <article className="min-w-0 overflow-hidden rounded-2xl border border-[#e9abc8] bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-[#8B5E7C]/70 hover:shadow-soft sm:rounded-[2rem]">
-      <Link to={`/produto/${product.slug}`}>
+      <Link to={`/produto/${product.slug}`} className="relative block">
         <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="aspect-square w-full bg-[#fffafc] object-contain sm:aspect-[4/3]" />
+        {discountPercentage > 0 && (
+          <span className="absolute left-2 top-2 rounded-full bg-[#8B5E7C] px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm">
+            -{discountPercentage}%
+          </span>
+        )}
+        {product.stock < 1 && (
+          <span className="absolute bottom-2 right-2 rounded-full bg-[#fffafc]/95 px-2.5 py-1 text-[10px] font-semibold text-[#8B5E7C] shadow-sm">
+            Esgotado
+          </span>
+        )}
       </Link>
       <div className="p-2.5 sm:p-4">
         <div className="mb-1.5 flex items-center justify-between sm:mb-2">
@@ -1813,6 +1872,13 @@ function ProductCardSkeleton() {
 
 function Header() {
   const { totalItems } = useCart();
+  const navigate = useNavigate();
+  const [headerSearch, setHeaderSearch] = useState('');
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!location.pathname.startsWith('/produtos')) setHeaderSearch('');
+  }, [location.pathname]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#f2dde8] bg-[#fffafc]/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm">
@@ -1829,6 +1895,26 @@ function Header() {
           <NavLink to="/" className={({ isActive }) => (isActive ? 'font-semibold text-[#2d1d25]' : '')}>Início</NavLink>
           <NavLink to="/produtos" className={({ isActive }) => (isActive ? 'font-semibold text-[#2d1d25]' : '')}>Produtos</NavLink>
         </nav>
+
+        <form
+          className="hidden w-full max-w-xs items-center lg:flex"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const query = headerSearch.trim();
+            navigate(query ? `/produtos?q=${encodeURIComponent(query)}` : '/produtos');
+          }}
+        >
+          <label className="relative w-full">
+            <span className="sr-only">Pesquisar produtos</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8B5E7C]" size={16} />
+            <input
+              value={headerSearch}
+              onChange={(event) => setHeaderSearch(event.target.value)}
+              placeholder="O que você procura?"
+              className="w-full rounded-full border border-[#efd7e7] bg-white py-2.5 pl-9 pr-4 text-sm text-[#3d2b35]"
+            />
+          </label>
+        </form>
 
         <div className="flex items-center gap-2">
           <PwaInstallButton />

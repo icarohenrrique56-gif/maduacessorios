@@ -71,3 +71,12 @@ Firebase Hosting é a única plataforma de hospedagem da aplicação. O `firebas
 
 ## Decisão 24
 No Supabase local, contas autenticadas podem acessar o painel sem perfil administrativo, inclusive em testes isolados. A exceção exige token com issuer local (`localhost`/`127.0.0.1:54321`); frontend, helpers RLS e Edge Function usam o mesmo limite. Não são criados nem alterados registros em `admin_user_permissions`, e a revogação fica indisponível nesse modo. Tokens de projetos hospedados continuam exigindo o perfil administrativo ativo, sem mudanças nas políticas de produção.
+
+## Decisão 25
+O carrinho só grava um pedido ao confirmar explicitamente a finalização pelo WhatsApp. Pedidos iniciados pelo WhatsApp começam como `pending`, não reservam nem baixam estoque e podem ser confirmados ou cancelados pelo administrador. A confirmação agrega linhas pelo ID do produto, baixa a soma das variações uma única vez e registra uma movimentação. O estorno exige motivo, agrega novamente as linhas e devolve cada unidade uma única vez.
+
+## Decisão 26
+Vendas rápidas são feitas pela RPC administrativa `quick_sale_stock_movement`, com quantidade, variação opcional e chave idempotente. A RPC valida autorização, trava o produto, verifica o saldo, atualiza `products.stock` e registra `stock_movements` em uma única transação. O frontend não faz update direto do estoque. O mesmo produto continua sendo atualizado em massa pelas variações, pois o saldo não é separado por variação.
+
+## Decisão 27
+A modernização visual da vitrine reutiliza componentes, rotas, serviços e identidades existentes do Vite/React. Categorias, disponibilidade, promoções e filtros usam dados reais do Supabase ou do catálogo carregado; não há campanhas, vendas, descontos ou categorias fictícias em produção. Pesquisa, preço, categoria, variação, disponibilidade, ordenação e produtos relacionados são combinações locais sobre o catálogo já carregado, sem consultas adicionais desnecessárias.

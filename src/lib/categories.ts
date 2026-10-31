@@ -38,9 +38,7 @@ export function normalizeCategory(record: Record<string, unknown>): Category {
 
 export async function getCategoriesFromSupabase(includeInactive = false): Promise<Category[]> {
   if (!supabase) {
-    return (includeInactive ? defaultCategories : defaultCategories.filter((category) => category.is_active !== false)).map((category) =>
-      normalizeCategory(category as Record<string, unknown>),
-    );
+    return [];
   }
 
   try {
@@ -60,11 +58,6 @@ export async function getCategoriesFromSupabase(includeInactive = false): Promis
     return (data ?? []).map((record) => normalizeCategory(record as Record<string, unknown>));
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'Erro ao carregar categorias.';
-    if (reason.includes('does not exist') || reason.includes('permission denied')) {
-      return defaultCategories
-        .filter((category) => includeInactive || category.is_active !== false)
-        .map((category) => normalizeCategory(category as Record<string, unknown>));
-    }
     throw new Error(`Não foi possível carregar as categorias: ${reason}`);
   }
 }

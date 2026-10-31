@@ -58,6 +58,8 @@ firebase deploy --only hosting --project maduacessorios-b8d44
 
 O Firebase Hosting não compila o app nem injeta variáveis de ambiente. Configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` (ou `VITE_SUPABASE_ANON_KEY`) e `VITE_WHATSAPP_NUMBER` no ambiente de build antes de executar `npm run build` (por exemplo, em `.env.production.local`, que não deve ser commitado). Essas variáveis públicas são incorporadas ao frontend durante o build; nunca use `service_role`. Use `--project OUTRO_PROJECT_ID` para substituir o projeto padrão em um deploy específico. O service worker e o manifest também são publicados como arquivos estáticos do Firebase Hosting.
 
+O script `scripts/check-supabase-config.mjs` é executado antes do build e bloqueia o deploy quando a URL ou a chave pública estiver ausente, vazia ou contendo valores de exemplo. Isso evita publicar uma loja sem conexão ao Supabase.
+
 Após o primeiro deploy, adicione o domínio do Hosting (por exemplo, `https://SEU_PROJECT_ID.web.app`) aos Site URLs e Redirect URLs do Supabase Auth, conforme as rotas `/admin/login` e `/admin` descritas acima. O Firebase é usado somente para hospedar os arquivos estáticos; autenticação, dados e imagens continuam no Supabase.
 
 ### Variáveis de ambiente por ambiente
