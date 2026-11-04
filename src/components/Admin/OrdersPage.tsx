@@ -5,6 +5,8 @@ import {
   confirmOrder,
   getOrderItems,
   getOrders,
+  getOrderTotalReview,
+  canConfirmPendingOrder,
   returnOrder,
   type Order,
   type OrderItem,
@@ -26,6 +28,10 @@ const statusLabels: Record<OrderStatus, string> = {
   confirmed: 'Venda confirmada',
   completed: 'Concluído',
   cancelled: 'Cancelado',
+  received: 'Recebido',
+  preparing: 'Em preparação',
+  shipped: 'Enviado',
+  delivered: 'Entregue',
 };
 
 function getOrderStatusLabel(order: Order) {
@@ -69,6 +75,9 @@ export function OrdersPage() {
     [filter, orders],
   );
   const selected = orders.find((order) => order.id === selectedId) ?? null;
+  const selectedReview = selected
+    ? getOrderTotalReview(selected, itemsByOrder[selected.id] ?? [])
+    : null;
 
   async function runAction(orderId: string, action: 'confirm' | 'cancel' | 'return') {
     setBusyId(orderId);
@@ -115,6 +124,7 @@ export function OrdersPage() {
           <div className="space-y-3">
             {visibleOrders.map((order) => {
               const firstItem = itemsByOrder[order.id]?.[0];
+              const review = getOrderTotalReview(order, itemsByOrder[order.id] ?? []);
               return (
                 <button key={order.id} type="button" onClick={() => setSelectedId(order.id)} className={`w-full rounded-[1.5rem] border p-3 text-left sm:p-4 ${selectedId === order.id ? 'border-[#8B5E7C] bg-[#fff5f9]' : 'border-[#f1dfe9] bg-white'}`}>
                   <div className="flex gap-3">
@@ -129,6 +139,9 @@ export function OrdersPage() {
                         <span>{new Date(order.created_at).toLocaleString('pt-BR')}</span>
                         <span className="font-semibold text-[#2d1d25]">{formatCurrency(order.subtotal_cents)}</span>
                       </div>
+                      {review.needsReview && (
+                        <p className="mt-2 text-xs font-semibold text-rose-700">Precisa de revisão: totais divergentes</p>
+                      )}
                     </div>
                   </div>
                 </button>
@@ -156,8 +169,29 @@ export function OrdersPage() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 flex justify-between text-sm font-semibold">
-                  <span>Total</span><span>{formatCurrency(selected.subtotal_cents)}</span>
+                {selectedReview?.needsReview && (
+                  <div role="alert" className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+                    <p className="font-semibold">Pedido precisa de revisão</p>
+                    <p className="mt-1">O valor registrado diverge da soma dos itens. A confirmação e a baixa de estoque estão bloqueadas.</p>
+                  </div>
+                )}
+                <div className="mt-4 space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span>Subtotal registrado</span>
+                    <span className="font-semibold">{formatCurrency(selected.subtotal_cents)}</span>
+                  </div>
+                  <div className="flex justify-between text-[#76506a]">
+                    <span>Soma dos itens</span>
+                    <span>{formatCurrency(selectedReview?.itemsTotalCents ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-[#76506a]">
+                    <span>Frete registrado</span>
+                    <span>{formatCurrency(selected.shipping_cents ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-semibold text-[#2d1d25]">
+                    <span>Total registrado</span>
+                    <span>{formatCurrency(selected.total_cents)}</span>
+                  </div>
                 </div>
                 {selected.customer_phone && (
                   <a href={buildWhatsAppUrl(selected.customer_phone, '')} target="_blank" rel="noreferrer" className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-[#efd7e7] text-sm text-[#76506a]">
@@ -171,7 +205,7 @@ export function OrdersPage() {
                 )}
                 {selected.status === 'pending' && (
                   <div className="mt-5 space-y-2">
-                    <button type="button" disabled={busyId === selected.id} onClick={() => void runAction(selected.id, 'confirm')} className="min-h-11 w-full rounded-full bg-[#8B5E7C] text-sm font-medium text-white disabled:opacity-60">
+                    <button type="button" disabled={busyId === selected.id || !canConfirmPendingOrder(selected, itemsByOrder[selected.id] ?? [])} onClick={() => void runAction(selected.id, 'confirm')} className="min-h-11 w-full rounded-full bg-[#8B5E7C] text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
                       {busyId === selected.id ? 'Processando...' : 'Confirmar venda e dar baixa'}
                     </button>
                     <button type="button" disabled={busyId === selected.id} onClick={() => void runAction(selected.id, 'cancel')} className="min-h-11 w-full rounded-full border border-rose-200 text-sm text-rose-700 disabled:opacity-60">

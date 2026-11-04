@@ -203,10 +203,10 @@ describe('Supabase product persistence', () => {
     expect(mocks.upload).not.toHaveBeenCalled();
 
     const oversizedFile = new File(['image'], 'photo.jpg', { type: 'image/jpeg' });
-    Object.defineProperty(oversizedFile, 'size', { value: 10 * 1024 * 1024 + 1 });
+    Object.defineProperty(oversizedFile, 'size', { value: 5 * 1024 * 1024 + 1 });
     expect(await uploadProductImage(oversizedFile, product.id)).toEqual({
       ok: false,
-      reason: 'A imagem deve ter no máximo 10 MB.',
+      reason: 'A imagem deve ter no máximo 5 MB.',
     });
     expect(mocks.upload).not.toHaveBeenCalled();
 

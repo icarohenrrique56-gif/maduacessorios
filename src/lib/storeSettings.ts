@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-export const MADU_WHATSAPP_NUMBER = '5575991334055';
+export const MADU_WHATSAPP_NUMBER = '';
 export const WHATSAPP_COMPATIBLE_EMOJIS = [
   '🌷', '🛍️', '🧾', '💬', '📦', '🚚', '💳', '✅',
   '❤️', '🌸', '✨', '🛒', '📲', '📸', '🎀', '🩷',

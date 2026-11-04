@@ -55,8 +55,8 @@ describe('product form helpers', () => {
     const file = new File(['image'], 'brinco.webp', { type: 'image/webp' });
     const oversizedFile = new File(['image'], 'brinco.png', { type: 'image/png' });
     const maximumFile = new File(['image'], 'max.webp', { type: 'image/webp' });
-    Object.defineProperty(maximumFile, 'size', { value: 10 * 1024 * 1024 });
-    Object.defineProperty(oversizedFile, 'size', { value: 10 * 1024 * 1024 + 1 });
+    Object.defineProperty(maximumFile, 'size', { value: 5 * 1024 * 1024 });
+    Object.defineProperty(oversizedFile, 'size', { value: 5 * 1024 * 1024 + 1 });
 
     expect(validateProductForm({ ...validForm, image: '' }, true).image).toBeUndefined();
     expect(createProductFromForm({ ...validForm, image: '' }, 'uuid-1234', true)?.image).toBe('');
@@ -65,7 +65,7 @@ describe('product form helpers', () => {
     expect(validateProductImageFile(new File(['image'], 'brinco.gif', { type: 'image/gif' }))).toBe(
       'Selecione uma imagem JPG, PNG ou WebP.',
     );
-    expect(validateProductImageFile(oversizedFile)).toBe('A imagem deve ter no máximo 10 MB.');
+    expect(validateProductImageFile(oversizedFile)).toBe('A imagem deve ter no máximo 5 MB.');
   });
 
   it('creates a normalized product with Brazilian prices and variations', () => {

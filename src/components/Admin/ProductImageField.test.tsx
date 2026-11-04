@@ -30,7 +30,7 @@ describe('ProductImageField', () => {
       <ProductImageField
         currentImage=""
         selectedFile={null}
-        error="A imagem deve ter no máximo 10 MB."
+        error="A imagem deve ter no máximo 5 MB."
         onFileChange={onFileChange}
       />,
     );
@@ -40,6 +40,6 @@ describe('ProductImageField', () => {
     });
 
     expect(onFileChange).toHaveBeenCalledWith(file);
-    expect(screen.getByRole('alert')).toHaveTextContent('A imagem deve ter no máximo 10 MB.');
+    expect(screen.getByRole('alert')).toHaveTextContent('A imagem deve ter no máximo 5 MB.');
   });
 });

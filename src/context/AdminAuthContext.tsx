@@ -140,9 +140,21 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    const sessionTimeout = window.setTimeout(() => {
+      if (!active || authEventReceived) return;
+      console.error('Tempo limite ao restaurar a sessão administrativa.');
+      setUser(null);
+      setAccessToken(null);
+      setRole(null);
+      setPermissionIssue(null);
+      setRoleLoading(false);
+      setLoading(false);
+    }, 4000);
+
     void supabase.auth.getSession()
       .then(({ data, error }) => {
         if (!active || authEventReceived) return;
+        window.clearTimeout(sessionTimeout);
         if (error) {
           console.error('Não foi possível restaurar a sessão administrativa.', error);
           setSessionNotice(getAdminLoginErrorMessage(error));
@@ -159,6 +171,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((error: unknown) => {
         if (!active || authEventReceived) return;
+        window.clearTimeout(sessionTimeout);
         console.error('Não foi possível restaurar a sessão administrativa.', error);
         setSessionNotice(getAdminLoginErrorMessage(error));
         setUser(null);
@@ -171,6 +184,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      window.clearTimeout(sessionTimeout);
       listener.subscription.unsubscribe();
     };
   }, [refreshRoleForUser]);

@@ -7,6 +7,7 @@ import {
   Package,
   ReceiptText,
   ShieldCheck,
+  WalletCards,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -49,6 +50,7 @@ const navigationGroups: NavigationGroup[] = [
       { id: 'produtos', label: 'Produtos', icon: Package },
       { id: 'pedidos', label: 'Pedidos', icon: ReceiptText },
       { id: 'estoque', label: 'Estoque e movimentações', icon: Package },
+      { id: 'financeiro', label: 'Financeiro', icon: WalletCards },
     ],
   },
   {
@@ -108,13 +110,12 @@ export function MaduSidebar({
         >
           <div className="flex min-w-0 items-center gap-3">
             <img
-              src="/assets/brand/madu-favicon.png"
+              src="/assets/brand/madu-logo-transparent.png"
               alt="MADU"
-              className="h-11 w-11 shrink-0 rounded-2xl bg-white p-1 object-contain"
+              className="h-10 w-12 shrink-0 rounded-lg object-contain bg-white/10 p-1"
             />
             {!collapsed && (
               <div>
-                <p className="text-lg font-bold tracking-[0.18em]">MADU</p>
                 <p className="mt-1 text-[10px] uppercase tracking-wider text-white/55">
                   Painel administrativo
                 </p>

@@ -92,7 +92,7 @@ export function ProductImageField({
           }}
         />
         <p id="product-image-help" className="mt-2 text-xs text-[#76506a]">
-          JPG, PNG ou WebP · máximo 10 MB
+          JPG, PNG ou WebP · máximo 5 MB
           {selectedFile ? ` · ${selectedFile.name}` : ''}
         </p>
         {error && (

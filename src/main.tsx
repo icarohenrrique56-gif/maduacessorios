@@ -6,6 +6,23 @@ import './index.css';
 import { CartProvider } from './context/CartContext';
 import { AdminAuthProvider } from './context/AdminAuthContext';
 import { StoreSettingsProvider } from './context/StoreSettingsContext';
+import { SplashScreen } from './components/SplashScreen';
+import { useAdminAuth } from './context/AdminAuthContext';
+import { useStoreSettings } from './context/StoreSettingsContext';
+
+function AppInitialization() {
+  const { loading: authLoading } = useAdminAuth();
+  const { loading: storeLoading } = useStoreSettings();
+  const storeReady = !storeLoading;
+  const authReady = !authLoading;
+
+  return (
+    <>
+      <SplashScreen isReady={storeReady && authReady} storeReady={storeReady} authReady={authReady} />
+      <App />
+    </>
+  );
+}
 
 if (!import.meta.env.DEV && 'serviceWorker' in navigator) {
   window.addEventListener(
@@ -25,7 +42,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <AdminAuthProvider>
         <CartProvider>
           <StoreSettingsProvider>
-            <App />
+            <AppInitialization />
           </StoreSettingsProvider>
         </CartProvider>
       </AdminAuthProvider>

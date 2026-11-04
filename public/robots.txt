@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://maduacessorios-b8d44.web.app/sitemap.xml

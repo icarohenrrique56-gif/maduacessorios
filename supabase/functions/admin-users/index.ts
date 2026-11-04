@@ -74,7 +74,8 @@ function jsonResponse(body: unknown, status: number, origin: string | null) {
 }
 
 function readAllowedOrigins() {
-  return (Deno.env.get('ADMIN_APP_ORIGINS') ?? 'http://localhost:5173')
+  return (Deno.env.get('ADMIN_APP_ORIGINS') ??
+    'http://localhost:5173,https://maduacessorios-b8d44.web.app')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);

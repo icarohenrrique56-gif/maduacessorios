@@ -239,7 +239,7 @@ export function PurchaseGuide() {
         aria-label="Como comprar"
         aria-haspopup="dialog"
         aria-controls="purchase-guide-dialog"
-        className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-3 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#8B5E7C] text-white shadow-lg transition active:scale-95 md:bottom-6 md:right-6"
+        className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-[calc(0.75rem+env(safe-area-inset-right))] z-40 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/30 bg-[#8B5E7C] text-white shadow-[0_8px_24px_rgba(93,68,84,0.24)] transition hover:bg-[#76506a] active:scale-95 md:bottom-6 md:right-[calc(1.5rem+env(safe-area-inset-right))]"
       >
         <CircleHelp size={24} aria-hidden="true" />
       </button>

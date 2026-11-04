@@ -29,9 +29,18 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError('');
     try {
-      const [number, orderMessage] = await Promise.all([
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error('Tempo limite ao carregar as configurações da loja.')),
+          4000,
+        );
+      });
+      const [number, orderMessage] = await Promise.race([
+        Promise.all([
         getWhatsAppNumber(),
         getWhatsAppOrderMessage(),
+        ]),
+        timeout,
       ]);
       setWhatsappNumber(number);
       setWhatsappOrderMessage(orderMessage);

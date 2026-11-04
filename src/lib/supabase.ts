@@ -172,9 +172,12 @@ export async function saveProductToSupabase(
     if (error.code === '23505') {
       return { ok: false, reason: 'Já existe um produto com esse SKU ou identificador.' };
     }
+    if (error.code === '42501') {
+      return { ok: false, reason: 'Sua sessão não está autorizada para cadastrar produtos. Entre novamente como administrador.' };
+    }
     return {
       ok: false,
-      reason: error.message,
+      reason: error.message || 'Erro desconhecido do Supabase.',
     };
   }
 
@@ -208,7 +211,10 @@ export async function updateProductInSupabase(
     if (error.code === '23505') {
       return { ok: false, reason: 'Já existe um produto com esse SKU ou identificador.' };
     }
-    return { ok: false, reason: error.message };
+    if (error.code === '42501') {
+      return { ok: false, reason: 'Sua sessão não está autorizada para alterar produtos. Entre novamente como administrador.' };
+    }
+    return { ok: false, reason: error.message || 'Erro desconhecido do Supabase.' };
   }
   if (!data) {
     return { ok: false, reason: 'O Supabase não confirmou a atualização do produto.' };

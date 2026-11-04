@@ -49,6 +49,16 @@ describe('PwaInstallButton', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+
+    it('does not render in administrative routes', () => {
+      render(
+        <MemoryRouter initialEntries={['/admin/financeiro']}>
+          <PurchaseGuide />
+        </MemoryRouter>,
+      );
+
+      expect(screen.queryByRole('button', { name: 'Como comprar' })).not.toBeInTheDocument();
+    });
   });
 
   it('keeps the catalog section active while viewing a product', () => {

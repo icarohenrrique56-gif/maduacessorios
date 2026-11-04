@@ -59,6 +59,12 @@ const OrdersPage = lazy(() =>
 const StockMovements = lazy(() =>
   import('./components/Admin/StockMovements').then((module) => ({ default: module.StockMovements })),
 );
+const FinancePage = lazy(() =>
+  import('./components/Admin/FinancePage').then((module) => ({ default: module.FinancePage })),
+);
+const DashboardPage = lazy(() =>
+  import('./components/Admin/DashboardPage').then((module) => ({ default: module.DashboardPage })),
+);
 
 function useStorefrontProducts(includeInactive = false) {
   const [catalog, setCatalog] = useState<ProductView[]>(
@@ -152,8 +158,13 @@ function App() {
         <Route path="/admin/*" element={<AdminRouteGuard><AdminModulePage /></AdminRouteGuard>} />
         <Route path="*" element={<HomePage />} />
       </Routes>
-      <StoreBottomNavigation />
-      <PurchaseGuide />
+      {!isAdminRoute && (
+        <>
+          <FloatingWhatsAppButton />
+          <StoreBottomNavigation />
+          <PurchaseGuide />
+        </>
+      )}
       <OfflineNotice />
       <VersionUpdateNotice />
     </div>
@@ -169,6 +180,25 @@ function RouteLoadingFallback() {
         <div className="h-11 w-full rounded-full bg-[#f8e9ef]" />
       </div>
     </main>
+  );
+}
+
+export function FloatingWhatsAppButton() {
+  const { whatsappNumber } = useStoreSettings();
+  const location = useLocation();
+  if (location.pathname.startsWith('/admin') || !whatsappNumber) return null;
+
+  return (
+    <a
+      href={buildWhatsAppUrl(whatsappNumber, 'Olá! Vim pelo site da MADU e gostaria de saber mais.')}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Falar com a Madu pelo WhatsApp"
+      className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] z-40 inline-flex min-h-12 max-w-[calc(100vw-7rem)] items-center gap-2 whitespace-nowrap rounded-full bg-[#8B5E7C] px-3 text-xs font-semibold text-white shadow-[0_8px_24px_rgba(93,68,84,0.24)] transition hover:bg-[#76506a] active:scale-[0.98] sm:px-4 sm:text-sm md:bottom-6 md:left-auto md:right-[calc(5.25rem+env(safe-area-inset-right))] md:max-w-none md:px-5"
+    >
+      <MessageCircleMore size={20} aria-hidden="true" />
+      <span>Falar com a Madu</span>
+    </a>
   );
 }
 
@@ -192,7 +222,7 @@ function HomePage() {
     <>
       <Header />
       <main className="mx-auto max-w-6xl px-4 pb-20 pt-4 sm:px-6 lg:px-8">
-        <section className="overflow-hidden rounded-[2rem] border border-[#e9abc8] bg-gradient-to-r from-[#f8dde8] via-[#f5e2ef] to-[#f5d7f0] shadow-soft">
+        <section className="overflow-hidden rounded-[1.75rem] border border-[#eadde5] bg-[linear-gradient(135deg,#fffafa_0%,#f8edf4_58%,#ede1f4_100%)] shadow-[0_18px_45px_rgba(85,54,71,0.08)]">
           <div className="grid gap-6 p-5 md:grid-cols-[1.1fr_0.9fr] md:p-10">
             <div className="flex flex-col justify-center">
               {heroProduct && (
@@ -202,19 +232,20 @@ function HomePage() {
                 </span>
               )}
               <h1 className="max-w-md text-3xl font-semibold leading-tight text-[#2d1d25] sm:text-5xl">
-                Peças delicadas para acompanhar seus melhores momentos.
+                Acessórios delicados para deixar seus momentos ainda mais especiais.
               </h1>
               <p className="mt-4 max-w-xl text-sm text-[#5d4454] sm:text-base">
-                Coleções curadas para valorizar o brilho do cotidiano com sofisticação, delicadeza e identidade feminina.
+                Encontre peças leves e versáteis para presentear, combinar com seu estilo ou guardar como um detalhe especial.
               </p>
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 <Link to="/produtos" className="inline-flex items-center justify-center rounded-full bg-[#8B5E7C] px-5 py-3 text-sm font-medium text-white shadow-md transition hover:opacity-90">
-                  Ver coleção
+                  {isLoading ? 'Ver catálogo' : homeProducts.length > 0 ? 'Ver peças disponíveis' : 'Ver novidades'}
                   <ArrowRight className="ml-2" size={16} />
                 </Link>
                 {whatsappNumber ? (
                   <a href={buildWhatsAppUrl(whatsappNumber, 'Olá! Vim pelo site da MADU.')} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-full border border-[#8B5E7C] bg-white/70 px-5 py-3 text-sm font-medium text-[#8B5E7C]">
-                    Falar no WhatsApp
+                    <MessageCircleMore className="mr-2" size={16} />
+                    Falar com a Madu
                   </a>
                 ) : (
                   <span className="inline-flex items-center justify-center rounded-full border border-[#8B5E7C]/40 bg-white/50 px-5 py-3 text-sm text-[#76506a]">
@@ -240,7 +271,23 @@ function HomePage() {
           </div>
         </section>
 
-        <section className="mt-10">
+        {!isLoading && homeProducts.length === 0 && (
+          <section className="mt-10 rounded-[2rem] border border-dashed border-[#d7b0c0] bg-white p-7 text-center shadow-sm sm:p-10">
+            <Sparkles className="mx-auto text-[#8B5E7C]" size={28} />
+            <h2 className="mt-3 text-2xl font-semibold text-[#2d1d25]">Estamos preparando novidades para você</h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#5d4454]">
+              Entre no nosso WhatsApp e receba um aviso assim que a próxima coleção chegar.
+            </p>
+            {whatsappNumber && (
+              <a href={buildWhatsAppUrl(whatsappNumber, 'Olá! Quero receber novidades da próxima coleção da MADU.')} target="_blank" rel="noreferrer" className="mt-5 inline-flex min-h-12 items-center justify-center rounded-full bg-[#8B5E7C] px-6 text-sm font-semibold text-white shadow-md">
+                <MessageCircleMore className="mr-2" size={18} />
+                Receber novidades
+              </a>
+            )}
+          </section>
+        )}
+
+        {realCategories.length > 0 && <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xl font-semibold text-[#2d1d25]">Categorias</h2>
             <Link to="/produtos" className="text-sm font-medium text-[#8B5E7C]">Ver tudo</Link>
@@ -252,7 +299,7 @@ function HomePage() {
               </Link>
             ))}
           </div>
-        </section>
+        </section>}
 
         {promotions.length > 0 && (
           <section className="mt-10">
@@ -269,7 +316,7 @@ function HomePage() {
           </section>
         )}
 
-        <section className="mt-10">
+        {homeProducts.length > 0 && <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xl font-semibold text-[#2d1d25]">Novidades</h2>
             <Link to="/produtos" className="text-sm font-medium text-[#8B5E7C]">Ver catálogo</Link>
@@ -281,13 +328,13 @@ function HomePage() {
                 ? homeProducts.slice(0, 3).map((product) => <ProductCard key={product.id} product={product} />)
                 : null}
           </div>
-        </section>
+        </section>}
 
         <section className="mt-6 grid gap-3 md:grid-cols-3 md:gap-4">
           {[
-            { icon: <Truck size={20} />, title: 'Entrega', text: 'Atendimento próximo com cuidado na escolha do presente.' },
-            { icon: <MessageCircleMore size={20} />, title: 'WhatsApp', text: 'Finalize o pedido de forma simples e direta.' },
-            { icon: <Heart size={20} />, title: 'Detalhes', text: 'Peças curadas com beleza, leveza e personalidade.' },
+            { icon: <Truck size={20} />, title: 'Entrega confirmada', text: 'Prazo, frete e região de entrega são combinados antes da compra ser concluída.' },
+            { icon: <MessageCircleMore size={20} />, title: 'Atendimento pelo WhatsApp', text: 'Tire dúvidas, confirme disponibilidade e faça seu pedido diretamente conosco.' },
+            { icon: <Heart size={20} />, title: 'Compra com atenção', text: 'Peças escolhidas com cuidado e informações claras sobre cada produto.' },
           ].map((item) => (
             <div key={item.title} className="rounded-2xl border border-[#f1dfe9] bg-white p-4 shadow-sm">
               <div className="mb-2 inline-flex rounded-full bg-[#f8e9ef] p-2.5 text-[#8B5E7C]">{item.icon}</div>
@@ -295,6 +342,24 @@ function HomePage() {
               <p className="mt-1 text-sm leading-5 text-[#5d4454]">{item.text}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mt-10 rounded-[2rem] border border-[#f1dfe9] bg-white p-5 shadow-sm sm:p-8">
+          <h2 className="text-xl font-semibold text-[#2d1d25]">Como comprar</h2>
+          <ol className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ['1', 'Escolha sua peça', 'Veja preço, detalhes e disponibilidade.'],
+              ['2', 'Pedir pelo WhatsApp', 'Envie a peça escolhida com seus dados.'],
+              ['3', 'Confirmar o pedido', 'A Madu confirma estoque, pagamento e entrega.'],
+              ['4', 'Receber com cuidado', 'Finalizamos tudo diretamente com você.'],
+            ].map(([number, title, text]) => (
+              <li key={number} className="rounded-2xl bg-[#fffafc] p-4">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#f8e9ef] text-sm font-semibold text-[#8B5E7C]">{number}</span>
+                <h3 className="mt-3 font-semibold text-[#2d1d25]">{title}</h3>
+                <p className="mt-1 text-sm leading-5 text-[#5d4454]">{text}</p>
+              </li>
+            ))}
+          </ol>
         </section>
       </main>
       <Footer />
@@ -305,6 +370,7 @@ function HomePage() {
 function CatalogPage() {
   const { catalog, isLoading, loadError, syncStatus } = useStorefrontProducts();
   const { categories } = useCatalogCategories();
+  const { whatsappNumber } = useStoreSettings();
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
   const [category, setCategory] = useState(searchParams.get('categoria') ?? 'Todas');
@@ -418,10 +484,24 @@ function CatalogPage() {
             filteredProducts.map((product) => <ProductCard key={product.id} product={product} />)
           ) : (
             <div className="col-span-full rounded-3xl border border-dashed border-[#d7b0c0] bg-white p-8 text-center text-[#5d4454]">
-              <p>Nenhum produto encontrado com esses filtros.</p>
-              <button type="button" onClick={() => { setSearch(''); setCategory('Todas'); setAvailableOnly(false); setSort('news'); setVariation('Todas'); setMinPrice(''); setMaxPrice(''); }} className="mt-4 min-h-11 rounded-full bg-[#8B5E7C] px-5 text-sm font-medium text-white">
-                Limpar filtros
-              </button>
+              {catalog.length === 0 ? (
+                <>
+                  <h1 className="text-xl font-semibold text-[#2d1d25]">Estamos preparando novidades para você</h1>
+                  <p className="mt-2">Receba um aviso da próxima coleção pelo WhatsApp.</p>
+                  {whatsappNumber && (
+                    <a href={buildWhatsAppUrl(whatsappNumber, 'Olá! Quero receber novidades da próxima coleção da MADU.')} target="_blank" rel="noreferrer" className="mt-4 inline-flex min-h-11 items-center rounded-full bg-[#8B5E7C] px-5 text-sm font-medium text-white">
+                      Receber novidades
+                    </a>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p>Nenhum produto encontrado com esses filtros.</p>
+                  <button type="button" onClick={() => { setSearch(''); setCategory('Todas'); setAvailableOnly(false); setSort('news'); setVariation('Todas'); setMinPrice(''); setMaxPrice(''); }} className="mt-4 min-h-11 rounded-full bg-[#8B5E7C] px-5 text-sm font-medium text-white">
+                    Limpar filtros
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -433,6 +513,7 @@ function CatalogPage() {
 
 function ProductPage() {
   const { catalog, isLoading, loadError } = useStorefrontProducts();
+  const { whatsappNumber } = useStoreSettings();
   const { slug } = useParams();
   const product = catalog.find((item) => item.slug === slug);
   const [selectedVariation, setSelectedVariation] = useState('');
@@ -446,6 +527,44 @@ function ProductPage() {
 
   useEffect(() => {
     if (product) void trackStorefrontEvent('product_view', { productId: product.id });
+  }, [product?.id]);
+
+  useEffect(() => {
+    if (!product) return;
+    document.title = `${product.name} | MADU Acessórios`;
+    let metaDescription = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    const previousDescription = metaDescription?.content ?? '';
+    if (!metaDescription) {
+      metaDescription = document.createElement('meta');
+      metaDescription.name = 'description';
+      document.head.appendChild(metaDescription);
+    }
+    metaDescription.content = `${product.name}: ${product.description.slice(0, 145)} Consulte preço, disponibilidade e compre pelo WhatsApp.`;
+    const script = document.createElement('script');
+    script.type = 'application/ld+json';
+    script.id = 'madu-product-jsonld';
+    script.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: product.name,
+      description: product.description,
+      image: product.image ? [product.image] : undefined,
+      sku: product.sku || undefined,
+      brand: { '@type': 'Brand', name: 'MADU Acessórios' },
+      offers: {
+        '@type': 'Offer',
+        priceCurrency: 'BRL',
+        price: ((product.sale_price_cents ?? product.price_cents) / 100).toFixed(2),
+        availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+        url: window.location.href,
+      },
+    });
+    document.head.appendChild(script);
+    return () => {
+      script.remove();
+      document.title = 'Madu Acessórios';
+      if (metaDescription) metaDescription.content = previousDescription;
+    };
   }, [product?.id]);
 
   const related = product
@@ -583,6 +702,18 @@ function ProductPage() {
                 {product.stock > 0 ? 'Adicionar ao carrinho' : 'Indisponível'}
               </button>
             </div>
+
+            {product.stock > 0 && whatsappNumber && (
+              <a
+                href={buildWhatsAppUrl(whatsappNumber, `Olá! Vi a peça ${product.name}${selectedVariation ? ` (${selectedVariation})` : ''} no site da MADU e gostaria de saber se ainda está disponível.`)}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex min-h-12 w-full items-center justify-center rounded-full border border-[#8B5E7C] bg-[#fffafc] px-4 text-sm font-semibold text-[#8B5E7C]"
+              >
+                <MessageCircleMore className="mr-2" size={18} />
+                Quero esta peça
+              </a>
+            )}
 
             <div className="mt-5 grid gap-2 text-sm text-[#5d4454]">
               <p>SKU: {product.sku ?? 'Não informado'}</p>
@@ -1597,6 +1728,11 @@ function AdminModulePage() {
   const [categoryMessage, setCategoryMessage] = useState('');
   const [categoryError, setCategoryError] = useState('');
   const modulePages: Record<string, { id: AdminPageId; title: string; description: string }> = {
+    dashboard: {
+      id: 'dashboard',
+      title: 'Dashboard',
+      description: 'Resumo real das vendas confirmadas, pagamentos, pedidos recentes e estoque.',
+    },
     categorias: {
       id: 'categorias',
       title: 'Categorias',
@@ -1620,7 +1756,7 @@ function AdminModulePage() {
     financeiro: {
       id: 'financeiro',
       title: 'Financeiro',
-      description: 'O sistema não registra pagamentos nem status financeiro. Como os pedidos são concluídos por WhatsApp, não há valores pagos ou pendentes disponíveis para exibir.',
+      description: 'Indicadores financeiros calculados a partir dos pedidos reais, com status de pagamento, cancelamentos e estornos registrados no sistema.',
     },
     configuracoes: {
       id: 'configuracoes',
@@ -1717,13 +1853,20 @@ function AdminModulePage() {
                 <Menu size={18} />
               </button>
               <p className="text-xs uppercase tracking-[0.24em] text-[#8B5E7C]">Painel administrativo</p>
-              <h1 className="mt-1 break-words text-xl font-semibold sm:text-2xl">{currentModule?.title ?? 'Área administrativa'}</h1>
+              <h1 className="mt-1 break-words text-xl font-semibold sm:text-2xl">
+                {currentModule?.title ?? (!module ? 'Dashboard' : 'Área administrativa')}
+              </h1>
             </div>
             <Link to="/" className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full bg-[#8B5E7C] px-4 text-sm font-medium text-white">Ver loja</Link>
           </header>
           <p className="mb-5 rounded-2xl border border-[#f1dfe9] bg-[#fef3f8] px-4 py-3 text-xs text-[#5d4454]">{syncStatus}</p>
           {message && <p role="alert" className="mb-5 rounded-2xl bg-rose-50 p-3 text-sm text-rose-900">{message}</p>}
-          {currentModule?.id === 'estoque' ? (
+          {!currentModule || currentModule.id === 'dashboard' ? (
+            <DashboardPage
+              catalog={catalog}
+              onNavigate={(page) => navigate(adminPaths[page])}
+            />
+          ) : currentModule?.id === 'estoque' ? (
             <section className="min-w-0 rounded-3xl border border-[#f1dfe9] bg-white p-3 sm:p-5">
               <p className="mb-4 text-sm text-[#5d4454]">{currentModule.description}</p>
               <ul className="divide-y divide-[#f1dfe9] md:hidden">
@@ -1758,6 +1901,12 @@ function AdminModulePage() {
             <section className="min-w-0">
               <Suspense fallback={<RouteLoadingFallback />}>
                 <OrdersPage />
+              </Suspense>
+            </section>
+          ) : currentModule?.id === 'financeiro' ? (
+            <section className="min-w-0">
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <FinancePage />
               </Suspense>
             </section>
           ) : currentModule?.id === 'categorias' ? (
@@ -1820,14 +1969,15 @@ function AdminModulePage() {
 }
 
 function ProductCard({ product }: { product: ProductView }) {
+  const { whatsappNumber } = useStoreSettings();
   const discountPercentage = product.sale_price_cents !== undefined && product.sale_price_cents < product.price_cents
     ? Math.round((1 - product.sale_price_cents / product.price_cents) * 100)
     : 0;
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-2xl border border-[#e9abc8] bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-[#8B5E7C]/70 hover:shadow-soft sm:rounded-[2rem]">
+    <article className="min-w-0 overflow-hidden rounded-[1.25rem] border border-[#eee3e8] bg-white shadow-[0_8px_24px_rgba(83,55,69,0.07)] transition duration-300 hover:-translate-y-1 hover:border-[#d8c0ce] hover:shadow-[0_18px_36px_rgba(83,55,69,0.12)]">
       <Link to={`/produto/${product.slug}`} className="relative block">
-        <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="aspect-square w-full bg-[#fffafc] object-contain sm:aspect-[4/3]" />
+        <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="aspect-square w-full bg-[#fbf8fa] object-contain p-1 sm:aspect-[4/3]" />
         {discountPercentage > 0 && (
           <span className="absolute left-2 top-2 rounded-full bg-[#8B5E7C] px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm">
             -{discountPercentage}%
@@ -1852,6 +2002,17 @@ function ProductCard({ product }: { product: ProductView }) {
         <p className={`mt-2 text-xs font-medium ${product.stock > 0 ? 'text-[#6f7b58]' : 'text-[#a15b67]'}`}>
           {product.stock > 0 ? `${product.stock} disponível${product.stock === 1 ? '' : 's'}` : 'Indisponível'}
         </p>
+        {product.stock > 0 && whatsappNumber && (
+          <a
+            href={buildWhatsAppUrl(whatsappNumber, `Olá! Vi a peça ${product.name} no site da MADU e gostaria de saber se ainda está disponível.`)}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-full border border-[#8B5E7C] px-3 text-xs font-semibold text-[#8B5E7C] sm:text-sm"
+          >
+            <MessageCircleMore className="mr-2" size={16} />
+            Quero esta peça
+          </a>
+        )}
       </div>
     </article>
   );
@@ -1872,6 +2033,7 @@ function ProductCardSkeleton() {
 
 function Header() {
   const { totalItems } = useCart();
+  const { whatsappNumber } = useStoreSettings();
   const navigate = useNavigate();
   const [headerSearch, setHeaderSearch] = useState('');
   const location = useLocation();
@@ -1881,13 +2043,13 @@ function Header() {
   }, [location.pathname]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-[#f2dde8] bg-[#fffafc]/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm">
+    <header className="sticky top-0 z-40 border-b border-[#eee4e8] bg-[#fffdfd]/95 pt-[env(safe-area-inset-top)] backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center gap-3">
           <img
             src={maduLogo}
             alt="Madu Acessórios"
-            className="h-12 w-auto object-contain"
+            className="h-11 w-auto object-contain sm:h-12"
           />
         </Link>
 
@@ -1918,12 +2080,31 @@ function Header() {
 
         <div className="flex items-center gap-2">
           <PwaInstallButton />
+          {whatsappNumber && (
+            <a
+              href={buildWhatsAppUrl(whatsappNumber, 'Olá! Vim pelo site da MADU e quero comprar.')}
+              target="_blank"
+              rel="noreferrer"
+              className="hidden min-h-11 items-center gap-2 rounded-full bg-[#8B5E7C] px-4 text-sm font-semibold text-white md:inline-flex"
+            >
+              <MessageCircleMore size={16} aria-hidden="true" />
+              Comprar pelo WhatsApp
+            </a>
+          )}
           <Link to="/produtos" aria-label="Pesquisar produtos" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[#efd7e7] bg-white p-2.5 text-[#8B5E7C]">
             <Search size={18} />
           </Link>
           <Link to="/carrinho" aria-label={`Carrinho${totalItems > 0 ? `, ${totalItems} itens` : ''}`} className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[#efd7e7] bg-white p-2.5 text-[#8B5E7C]">
             <ShoppingBag size={18} />
             {totalItems > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#8B5E7C] px-1 text-[10px] font-semibold text-white">{totalItems}</span>}
+          </Link>
+          <Link
+            to="/admin/login"
+            aria-label="Área administrativa"
+            title="Área administrativa"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-[#efd7e7] bg-white text-[#8B5E7C] shadow-sm transition hover:bg-[#f8e9ef] active:scale-95"
+          >
+            <Settings size={18} aria-hidden="true" />
           </Link>
         </div>
       </div>
@@ -1942,22 +2123,13 @@ export function Footer() {
           <span>Instagram</span>
           {whatsappNumber ? (
             <a href={buildWhatsAppUrl(whatsappNumber, 'Olá! Vim pelo site da MADU.')} target="_blank" rel="noreferrer" className="hover:text-[#8B5E7C]">
-              WhatsApp
+              WhatsApp: {whatsappNumber.replace(/^55/, '+55 ')}
             </a>
           ) : (
             <span aria-label="WhatsApp não configurado">WhatsApp</span>
           )}
           <span>Política</span>
         </div>
-        <Link
-          to="/admin/login"
-          aria-label="Área administrativa"
-          title="Área administrativa"
-          className="inline-flex min-h-11 items-center gap-2 self-start rounded-full border border-[#efd7e7] px-4 text-xs text-[#8B5E7C] transition hover:bg-[#f8e9ef] sm:self-auto"
-        >
-          <Settings size={15} aria-hidden="true" />
-          Área administrativa
-        </Link>
       </div>
     </footer>
   );

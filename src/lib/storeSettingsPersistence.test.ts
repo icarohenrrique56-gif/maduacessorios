@@ -74,7 +74,7 @@ describe('persisted WhatsApp settings', () => {
     );
   });
 
-  it('uses the canonical MADU number when the database read fails', async () => {
+  it('does not reuse a fixed phone number when the database read fails', async () => {
     mocks.maybeSingle.mockResolvedValue({
       data: null,
       error: { message: 'permission denied' },

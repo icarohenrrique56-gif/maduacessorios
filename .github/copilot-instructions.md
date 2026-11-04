@@ -9,3 +9,4 @@
 - Criar pedidos no Supabase somente pelo clique explícito de “Finalizar pedido pelo WhatsApp”.
 - Confirmar vendas e registrar vendas rápidas exclusivamente por RPC administrativa; nunca alterar `products.stock` diretamente pelo frontend.
 - Nunca publicar sem credenciais públicas válidas do Supabase. `npm run build` deve bloquear builds que não tenham `VITE_SUPABASE_URL` e uma chave pública.
+- Quando uma migration Supabase estiver pendente, aplicar automaticamente no projeto remoto vinculado. Antes de aplicar, executar dry-run e criar backup do banco. Depois, aplicar as migrations, verificar o histórico remoto, executar os testes e o build.

@@ -1,11 +1,16 @@
 const CACHE_PREFIX = 'madu-pwa-';
-const SHELL_CACHE = `${CACHE_PREFIX}shell-v2`;
-const ASSET_CACHE = `${CACHE_PREFIX}assets-v2`;
+const SHELL_CACHE = `${CACHE_PREFIX}shell-v5`;
+const ASSET_CACHE = `${CACHE_PREFIX}assets-v5`;
 const SHELL_FILES = [
   '/offline.html',
+  '/assets/brand/madu-favicon.ico',
   '/assets/brand/madu-favicon.png',
-  '/assets/brand/madu-app-icon.svg',
-  '/assets/brand/madu-maskable.svg',
+  '/assets/brand/favicon-16x16.png',
+  '/assets/brand/favicon-32x32.png',
+  '/assets/brand/apple-touch-icon.png',
+  '/assets/brand/madu-app-icon-192.png',
+  '/assets/brand/madu-app-icon-512.png',
+  '/assets/brand/madu-maskable.png',
 ];
 
 self.addEventListener('install', (event) => {

@@ -22,7 +22,7 @@ export type ProductFormValues = {
 export type ProductFormField = keyof ProductFormValues;
 export type ProductFormErrors = Partial<Record<ProductFormField, string>>;
 
-export const MAX_PRODUCT_IMAGE_SIZE = 10 * 1024 * 1024;
+export const MAX_PRODUCT_IMAGE_SIZE = 5 * 1024 * 1024;
 export const PRODUCT_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
 export const emptyProductForm: ProductFormValues = {
@@ -49,7 +49,7 @@ export function validateProductImageFile(file: File): string | null {
     return 'Selecione uma imagem JPG, PNG ou WebP.';
   }
   if (file.size > MAX_PRODUCT_IMAGE_SIZE) {
-    return 'A imagem deve ter no máximo 10 MB.';
+    return 'A imagem deve ter no máximo 5 MB.';
   }
   return null;
 }
