@@ -43,12 +43,7 @@ select
 from auth.users as users
 where users.email is not null
   and users.raw_app_meta_data ->> 'role' = 'admin'
-on conflict (user_id) do update
-  set email = excluded.email,
-      role = 'admin',
-      is_active = true,
-      status = 'active',
-      updated_at = now();
+on conflict (user_id) do nothing;
 
 alter table public.store_settings enable row level security;
 alter table public.admin_user_permissions enable row level security;

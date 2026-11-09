@@ -1,5 +1,7 @@
 -- MADU schema bootstrap. Review existing tables and RLS policies before running.
 -- This script is additive: it does not delete existing data or legacy policies.
+-- The ordered files in supabase/migrations are the canonical schema history; this bootstrap is not a generated current-state snapshot.
+-- Do not use this file as a substitute for applying/validating the migration chain against the target Supabase project.
 
 create table if not exists public.products (
   id text primary key default ('prod-'::text || gen_random_uuid()::text),

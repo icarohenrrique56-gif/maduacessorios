@@ -107,13 +107,24 @@ describe('Supabase product persistence', () => {
     });
   });
 
-  it('finds a confirmed product again when the catalog is reloaded', async () => {
+  it('loads a minimized public product without SKU or exact stock', async () => {
     mocks.single.mockResolvedValue({ data: product, error: null });
     const saved = await saveProductToSupabase(product);
     expect(saved.ok).toBe(true);
 
+    mocks.order.mockResolvedValue({ data: [{ ...product, is_available: true }], error: null });
+    const catalog = await getProductsFromSupabase();
+    expect(mocks.from).toHaveBeenLastCalledWith('storefront_products');
+    expect(catalog[0]).toMatchObject({ id: product.id, name: product.name, is_available: true });
+    expect('sku' in catalog[0]).toBe(false);
+    expect('stock' in catalog[0]).toBe(false);
+  });
+
+  it('uses the internal products table only when admin catalog data is requested', async () => {
     mocks.order.mockResolvedValue({ data: [product], error: null });
-    await expect(getProductsFromSupabase()).resolves.toEqual([product]);
+
+    await expect(getProductsFromSupabase(true)).resolves.toMatchObject([product]);
+    expect(mocks.from).toHaveBeenLastCalledWith('products');
   });
 
   it('updates an existing product without treating its own SKU as a duplicate', async () => {
@@ -124,7 +135,7 @@ describe('Supabase product persistence', () => {
 
     expect(result).toEqual({ ok: true, product: { ...product, name: 'Argola atualizada' } });
     expect(mocks.neq).toHaveBeenCalledWith('id', product.id);
-    const { stock: _stock, ...productWithoutStock } = {
+    const { stock: _stock, id: _id, ...productWithoutStock } = {
       ...product,
       name: 'Argola atualizada',
       sale_price_cents: 119990,
@@ -255,7 +266,7 @@ describe('Supabase product persistence', () => {
   it('returns an empty remote catalog and surfaces read failures', async () => {
     mocks.order.mockResolvedValue({ data: [], error: null });
     await expect(getProductsFromSupabase()).resolves.toEqual([]);
-    expect(mocks.eq).toHaveBeenCalledWith('is_active', true);
+    expect(mocks.from).toHaveBeenLastCalledWith('storefront_products');
 
     vi.clearAllMocks();
     const query = {
@@ -272,6 +283,7 @@ describe('Supabase product persistence', () => {
     mocks.select.mockReturnValue(query);
     mocks.order.mockResolvedValue({ data: [], error: null });
     await expect(getProductsFromSupabase(true)).resolves.toEqual([]);
+    expect(mocks.from).toHaveBeenLastCalledWith('products');
     expect(mocks.eq).not.toHaveBeenCalled();
 
     mocks.order.mockResolvedValue({

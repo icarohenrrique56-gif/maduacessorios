@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
-import { getStockMovements, getOrderItemsByIds, recordQuickSale, resetStockMovementHistory, setProductStock, type OrderItem, type StockMovement } from '../../lib/orders';
+import { adjustProductStock, getStockMovementByIdempotencyKey, getStockMovements, getOrderItemsByIds, recordQuickSale, resetStockMovementHistory, setProductStock, type OrderItem, type StockMovement } from '../../lib/orders';
 import { getProductsFromSupabase } from '../../lib/supabase';
 import type { Product } from '../../data/mockProducts';
 import { formatCurrency } from '../../lib/commerce';
@@ -28,17 +28,18 @@ export function StockMovements() {
   const [adjustStock, setAdjustStock] = useState('');
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustingProductId, setAdjustingProductId] = useState<string | null>(null);
+  const quickSaleKeyRef = useRef<{ signature: string; key: string } | null>(null);
+  const adjustmentKeyRef = useRef<{ signature: string; key: string } | null>(null);
 
   async function refresh() {
-    void getStockMovements()
-      .then(async (nextMovements) => {
-        setMovements(nextMovements);
-        const orderIds = [...new Set(nextMovements.map((movement) => movement.order_id).filter((id): id is string => Boolean(id)))];
-        setOrderItems(await getOrderItemsByIds(orderIds));
-      })
-      .catch((reason: unknown) => {
-        setError(reason instanceof Error ? reason.message : 'Não foi possível carregar o histórico.');
-      });
+    try {
+      const nextMovements = await getStockMovements();
+      setMovements(nextMovements);
+      const orderIds = [...new Set(nextMovements.map((movement) => movement.order_id).filter((id): id is string => Boolean(id)))];
+      setOrderItems(await getOrderItemsByIds(orderIds));
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Não foi possível carregar o histórico.');
+    }
   }
 
   useEffect(() => {
@@ -61,16 +62,32 @@ export function StockMovements() {
     setError('');
     setSuccess('');
     try {
-      const idempotencyKey = typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const signature = JSON.stringify([productId, variation || null, parsedQuantity]);
+      if (quickSaleKeyRef.current && quickSaleKeyRef.current.signature !== signature) {
+        await getStockMovementByIdempotencyKey(quickSaleKeyRef.current.key);
+        quickSaleKeyRef.current = null;
+      }
+      if (quickSaleKeyRef.current?.signature !== signature) {
+        quickSaleKeyRef.current = {
+          signature,
+          key: typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        };
+      }
+      const idempotencyKey = quickSaleKeyRef.current.key;
       await recordQuickSale({ productId, variation: variation || undefined, quantity: parsedQuantity, idempotencyKey });
+      quickSaleKeyRef.current = null;
       setSuccess('Venda rápida registrada e estoque reduzido.');
       setVariation('');
-      await Promise.all([
-        refresh(),
-        getProductsFromSupabase(true).then(setProducts),
-      ]);
+      try {
+        await Promise.all([
+          refresh(),
+          getProductsFromSupabase(true).then(setProducts),
+        ]);
+      } catch {
+        setError('Venda registrada. Não foi possível atualizar o histórico; use Atualizar antes da próxima operação.');
+      }
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível registrar a venda rápida.');
     } finally {
@@ -104,9 +121,12 @@ export function StockMovements() {
     setError('');
     setSuccess('');
     try {
+      const currentProduct = products.find((product) => product.id === adjustProductId);
+      if (!currentProduct) throw new Error('Produto não encontrado. Atualize a tela e tente novamente.');
       await setProductStock({
         productId: adjustProductId,
         stock: parsedStock,
+        expectedStock: currentProduct.stock,
         reason: adjustReason || undefined,
       });
       setAdjustReason('');
@@ -123,22 +143,37 @@ export function StockMovements() {
   }
 
   async function handleStepStock(product: Product, delta: 1 | -1) {
-    const nextStock = product.stock + delta;
-    if (nextStock < 0) return;
+    if (delta < 0 && product.stock === 0) return;
     setAdjustingProductId(product.id);
     setBusy(true);
     setError('');
     setSuccess('');
     try {
-      await setProductStock({
+      const signature = JSON.stringify([product.id, delta]);
+      if (adjustmentKeyRef.current && adjustmentKeyRef.current.signature !== signature) {
+        await getStockMovementByIdempotencyKey(adjustmentKeyRef.current.key);
+        adjustmentKeyRef.current = null;
+      }
+      if (adjustmentKeyRef.current?.signature !== signature) {
+        adjustmentKeyRef.current = {
+          signature,
+          key: typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        };
+      }
+      const result = await adjustProductStock({
         productId: product.id,
-        stock: nextStock,
+        delta,
+        idempotencyKey: adjustmentKeyRef.current.key,
         reason: delta > 0 ? 'Aumento manual em 1 unidade' : 'Redução manual em 1 unidade',
       });
+      adjustmentKeyRef.current = null;
       setProducts((current) => current.map((item) => (
-        item.id === product.id ? { ...item, stock: nextStock } : item
+        item.id === product.id ? { ...item, stock: result.stock } : item
       )));
-      setSuccess(`${product.name}: saldo atualizado para ${nextStock} unidade${nextStock === 1 ? '' : 's'}.`);
+      setAdjustStock((current) => adjustProductId === product.id ? String(result.stock) : current);
+      setSuccess(`${product.name}: saldo atualizado para ${result.stock} unidade${result.stock === 1 ? '' : 's'}.`);
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível alterar o saldo.');
@@ -152,30 +187,28 @@ export function StockMovements() {
     .filter((movement) => movement.type === 'sale')
     .reduce((sum, movement) => sum + movement.quantity, 0);
 
-  const soldValue = movements.reduce((sum, movement) => {
-    if (movement.type !== 'sale') return sum;
-    if (movement.order_id) {
-      return sum + orderItems
-        .filter((item) => item.order_id === movement.order_id && item.product_id === movement.product_id)
-        .reduce((itemSum, item) => itemSum + item.total_cents, 0);
-    }
-    const priceCents = movement.products?.sale_price_cents
-      || movement.products?.price_cents
-      || 0;
-    return sum + movement.quantity * priceCents;
-  }, 0);
+  const historicalPriceMissingCount = movements.filter((movement) => (
+    movement.type === 'sale' && movementValue(movement) === null
+  )).length;
+  const soldValue = movements.reduce((sum, movement) => (
+    sum + (movementValue(movement) ?? 0)
+  ), 0);
 
   function movementValue(movement: StockMovement & {
     products?: { name: string; sku: string | null; image: string; price_cents: number | null; sale_price_cents: number | null };
-  }) {
+  }): number | null {
     if (movement.type !== 'sale') return 0;
     if (movement.order_id) {
-      return orderItems
-        .filter((item) => item.order_id === movement.order_id && item.product_id === movement.product_id)
-        .reduce((sum, item) => sum + item.total_cents, 0);
+      const items = orderItems.filter((item) => (
+        item.order_id === movement.order_id && item.product_id === movement.product_id
+      ));
+      if (items.length > 0) return items.reduce((sum, item) => sum + item.total_cents, 0);
+      if (movement.total_price_cents != null) return movement.total_price_cents;
+      return null;
     }
-    const priceCents = movement.products?.sale_price_cents || movement.products?.price_cents || 0;
-    return movement.quantity * priceCents;
+    if (movement.total_price_cents != null) return movement.total_price_cents;
+    if (movement.unit_price_cents != null) return movement.quantity * movement.unit_price_cents;
+    return null;
   }
 
   return (
@@ -190,6 +223,11 @@ export function StockMovements() {
         <div className="rounded-[1.5rem] border border-[#f1dfe9] bg-[#fffafc] p-4">
           <p className="text-xs text-[#76506a]">Valor vendido</p>
           <p className="mt-1 text-xl font-semibold text-[#2d1d25]">{formatCurrency(soldValue)}</p>
+          {historicalPriceMissingCount > 0 && (
+            <p className="mt-1 text-xs text-[#76506a]">
+              {historicalPriceMissingCount} venda(s) antiga(s) sem preço histórico não foram somadas.
+            </p>
+          )}
         </div>
       </div>
       <div className="mb-5 rounded-[1.5rem] border border-[#f1dfe9] bg-[#fffafc] p-4">
@@ -326,7 +364,9 @@ export function StockMovements() {
             <div className="text-right text-xs text-[#76506a]">
               <p>{new Date(movement.created_at).toLocaleString('pt-BR')}</p>
               {movement.type === 'sale' && (
-                <p className="mt-1 font-semibold text-[#8B5E7C]">{formatCurrency(movementValue(movement))}</p>
+                <p className="mt-1 font-semibold text-[#8B5E7C]">
+                  {movementValue(movement) === null ? 'Valor não registrado' : formatCurrency(movementValue(movement) ?? 0)}
+                </p>
               )}
               {movement.order_id && <p className="mt-1 break-all">Pedido vinculado</p>}
             </div>

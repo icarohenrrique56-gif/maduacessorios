@@ -42,6 +42,7 @@ function CartHarness() {
         Adicionar prata
       </button>
       <button onClick={() => updateQuantity(catalogProduct.id, 'Dourado', 1)}>Ajustar dourado</button>
+      <button onClick={() => updateQuantity(catalogProduct.id, 'Prata', 2)}>Exceder estoque agregado</button>
       <button onClick={() => removeItem(catalogProduct.id, 'Dourado')}>Remover dourado</button>
       <button onClick={() => refreshFromCatalog([{ ...catalogProduct, name: 'Nome atualizado', price_cents: 6000 }])}>
         Atualizar catálogo
@@ -71,5 +72,29 @@ describe('cart user data', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remover dourado' }));
     expect(screen.getByText(/\[\{"id":"real-product","name":"Nome atualizado".*?"variation":"Prata"/)).toBeInTheDocument();
+  });
+
+  it('does not let quantity changes exceed the product stock across variations', () => {
+    render(<CartProvider><CartHarness /></CartProvider>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar dourado' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar prata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exceder estoque agregado' }));
+
+    const output = screen.getByText((_, element) => element?.tagName.toLowerCase() === 'output');
+    const cartItems = JSON.parse(output.textContent ?? '[]') as Array<{ variation?: string; quantity: number }>;
+    expect(cartItems.map((item) => [item.variation, item.quantity])).toEqual([
+      ['Dourado', 2],
+      ['Prata', 1],
+    ]);
+  });
+
+  it('starts with an empty cart when persisted JSON is malformed', () => {
+    localStorage.setItem('madu-cart', '{invalid json');
+
+    render(<CartProvider><CartHarness /></CartProvider>);
+
+    expect(screen.getByText('[]')).toBeInTheDocument();
+    expect(localStorage.getItem('madu-cart')).toBe('[]');
   });
 });

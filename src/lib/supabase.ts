@@ -3,14 +3,16 @@ import { type Product } from '../data/mockProducts';
 import { validateProductImageFile } from './products';
 
 export const PRODUCT_IMAGES_BUCKET = 'product-images';
+export type StorefrontProduct = Omit<Product, 'sku' | 'stock'> & { is_available: boolean };
 const viteUrl =
   import.meta.env.VITE_SUPABASE_URL?.trim() ||
   import.meta.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-  'https://dtxnspjwssuleoqxyvbx.supabase.co';
+  '';
 const viteKey = (
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
   import.meta.env.VITE_SUPABASE_ANON_KEY ??
-  import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 )?.trim();
 const supabaseUrl = viteUrl && viteUrl !== 'https://example.supabase.co' ? viteUrl : '';
 const supabaseKey = viteKey && viteKey !== 'replace-with-public-publishable-key' ? viteKey : '';
@@ -61,6 +63,12 @@ function normalizeProduct(record: Record<string, unknown>): Product {
     care: typeof record.care === 'string' ? record.care : undefined,
     warranty: typeof record.warranty === 'string' ? record.warranty : undefined,
   };
+}
+
+function normalizeStorefrontProduct(record: Record<string, unknown>): StorefrontProduct {
+  const product = normalizeProduct(record);
+  const { sku: _sku, stock: _stock, ...publicProduct } = product;
+  return { ...publicProduct, is_available: record.is_available === true };
 }
 
 function productPayload(product: Product) {
@@ -131,20 +139,26 @@ export async function uploadProductImage(
   return { ok: true, publicUrl: data.publicUrl };
 }
 
-export async function getProductsFromSupabase(includeInactive = false): Promise<Product[]> {
+export function getProductsFromSupabase(includeInactive: true): Promise<Product[]>;
+export function getProductsFromSupabase(includeInactive?: false): Promise<StorefrontProduct[]>;
+export async function getProductsFromSupabase(
+  includeInactive = false,
+): Promise<Product[] | StorefrontProduct[]> {
   if (!supabase) {
     throw new Error('Supabase não configurado. Configure a URL e uma chave pública antes do build.');
   }
 
-  let query = supabase.from('products').select('*');
-  if (!includeInactive) query = query.eq('is_active', true);
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data, error } = includeInactive
+    ? await supabase.from('products').select('*').order('created_at', { ascending: false })
+    : await supabase.from('storefront_products').select('*').order('created_at', { ascending: false });
 
   if (error) {
     throw new Error(`Não foi possível carregar os produtos: ${error.message}`);
   }
 
-  return (data ?? []).map((record) => normalizeProduct(record as Record<string, unknown>));
+  return includeInactive
+    ? (data ?? []).map((record) => normalizeProduct(record as Record<string, unknown>))
+    : (data ?? []).map((record) => normalizeStorefrontProduct(record as Record<string, unknown>));
 }
 
 export async function saveProductToSupabase(
@@ -198,8 +212,9 @@ export async function updateProductInSupabase(
   const skuError = await findDuplicateSku(product, product.id);
   if (skuError) return { ok: false, reason: skuError };
 
-  const payload = { ...productPayload(product) };
-  delete (payload as { stock?: number }).stock;
+const payload = { ...productPayload(product) };
+delete (payload as { stock?: number }).stock;
+  delete (payload as { id?: string }).id;
   const { data, error } = await supabase
     .from('products')
     .update(payload)

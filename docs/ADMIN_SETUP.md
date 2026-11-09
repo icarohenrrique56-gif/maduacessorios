@@ -98,6 +98,19 @@ Para a gestão funcionar na publicação estática, configure `VITE_SUPABASE_URL
 
 Em **Administração → Configurações**, informe o número comercial com código do país e salve. O número fica em `public.store_settings.whatsapp_number` na linha `id = 'main'`; vitrine, rodapé e carrinho leem essa mesma configuração. O `VITE_WHATSAPP_NUMBER` é apenas um fallback opcional se a linha ainda não existir. Não há número fictício padrão; sem valor confirmado, os links de contato/checkout não são gerados.
 
+## Edge Functions do checkout
+
+O checkout exige as Edge Functions `validate-cart-stock` e `create-whatsapp-order`, além da migration de hardening. Depois de revisar e aplicar as migrations no projeto Supabase correto, implante as funções:
+
+```bash
+npx supabase functions deploy validate-cart-stock
+npx supabase functions deploy create-whatsapp-order
+```
+
+Esses dois endpoints são públicos de propósito (`verify_jwt = false` em `supabase/config.toml`), pois atendem visitantes sem login. Eles validam o payload e aplicam limite por IP no servidor; o RPC de pedido e a tabela de reservas não ficam acessíveis aos papéis `anon`/`authenticated`, e a chave `service_role` é usada somente dentro da Edge Function. Não coloque essa chave em `VITE_*`. O ambiente da Edge Function deve conter as variáveis padrão `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` disponibilizadas pelo Supabase. Teste primeiro em staging e confirme que o gateway encaminha os cabeçalhos de IP usados para rate limit.
+
+Cada pedido pendente reserva estoque por até 30 minutos. Se a reserva expirar, o painel não confirma a venda usando aquela reserva; cancele o pedido pendente e solicite ao cliente que refaça o checkout. Cancelamentos administrativos liberam reservas imediatamente; se o cliente alterar o carrinho na mesma sessão, a Edge Function cancela o pedido anterior e libera sua reserva antes de validar o novo conteúdo. Confirmações consomem a reserva e baixam o saldo em uma única transação. Ajustes administrativos e vendas rápidas não podem consumir unidades ainda reservadas. Isso não é cobrança online: o pagamento continua sendo combinado manualmente pelo WhatsApp.
+
 ## Produtos e Storage
 
 - A vitrine consulta somente produtos com `is_active = true`; administradores autenticados podem consultar todos e gerenciar o catálogo.
@@ -129,7 +142,7 @@ where lower(users.email) = lower('email-usado-no-login@example.com');
 
 Confirme que `permission_user_id` corresponde ao `auth_user_id`, que `role` é `admin`, `is_active` é `true` e `status` é `active`; o e-mail salvo no perfil não é usado para autorizar. Se a linha não existir mas `raw_app_meta_data.role` for `admin`, aplique a migration de backfill. Se a linha não existir ou estiver inativa por outro motivo, siga o procedimento de bootstrap confiável acima para uma conta verificada. Após corrigir a permissão no banco, encerre a sessão e entre novamente. Não habilite acesso automaticamente para todas as contas Auth.
 
-Categorias administrativas, clientes, pedidos e financeiro ainda não têm integração funcional no app. O checkout envia um resumo real do carrinho ao WhatsApp, mas não grava um pedido, reserva estoque nem processa/confirmar pagamento.
+Categorias, pedidos, movimentos de estoque e relatórios financeiros usam o Supabase. O checkout grava um pedido pendente, reserva estoque por até 30 minutos e envia o resumo pelo WhatsApp; não processa pagamentos online nem confirma automaticamente a venda.
 
 ## Setup local e execução
 

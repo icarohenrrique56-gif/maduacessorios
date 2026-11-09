@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canConfirmPendingOrder,
+  collectAllPages,
   getOrderItemsTotalCents,
   getOrderTotalReview,
   type Order,
@@ -87,5 +88,33 @@ describe('order total consistency', () => {
 
   it('keeps consistent orders confirmable', () => {
     expect(canConfirmPendingOrder(order(), [item()])).toBe(true);
+  });
+});
+
+describe('complete financial pagination', () => {
+  it('collects every page when the dataset exceeds 500 records', async () => {
+    const records = Array.from({ length: 1201 }, (_, index) => index + 1);
+    const ranges: Array<[number, number]> = [];
+    const result = await collectAllPages(async (from, to) => {
+      ranges.push([from, to]);
+      return {
+        items: records.slice(from, to + 1),
+        count: records.length,
+      };
+    });
+
+    expect(result).toEqual(records);
+    expect(ranges).toEqual([[0, 499], [500, 999], [1000, 1499]]);
+  });
+
+  it('stops on a short page and clamps unsafe page sizes', async () => {
+    const ranges: Array<[number, number]> = [];
+    const result = await collectAllPages(async (from, to) => {
+      ranges.push([from, to]);
+      return { items: from === 0 ? ['one'] : [], count: 9999 };
+    }, 10_000);
+
+    expect(result).toEqual(['one']);
+    expect(ranges).toEqual([[0, 499]]);
   });
 });

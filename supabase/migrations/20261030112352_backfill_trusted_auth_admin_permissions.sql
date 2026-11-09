@@ -17,11 +17,6 @@ select
   'active'
 from auth.users as users
 where users.raw_app_meta_data ->> 'role' = 'admin'
-on conflict (user_id) do update
-  set email = excluded.email,
-      role = 'admin',
-      is_active = true,
-      status = 'active',
-      updated_at = now();
+on conflict (user_id) do nothing;
 
 notify pgrst, 'reload schema';

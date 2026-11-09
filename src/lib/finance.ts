@@ -64,7 +64,7 @@ export function getFinanceRange(period: FinancePeriod, customStart = '', customE
 }
 
 export function isCommercialSale(order: Order) {
-  if (order.status === 'cancelled' || order.cancelled_at || order.returned_at) return false;
+  if (order.status === 'cancelled' || order.payment_status === 'cancelled' || isRefundedOrder(order) || order.cancelled_at) return false;
   return ['confirmed', 'completed', 'preparing', 'shipped', 'delivered'].includes(order.status);
 }
 
@@ -83,11 +83,16 @@ export function isRefundedOrder(order: Order) {
   return order.returned_at !== null || order.payment_status === 'refunded';
 }
 
+export function isCancelledOrder(order: Order) {
+  return !isRefundedOrder(order)
+    && (order.status === 'cancelled' || order.payment_status === 'cancelled' || Boolean(order.cancelled_at));
+}
+
 export function summarizeFinance(orders: Order[]) {
   const valid = orders.filter(isCommercialSale);
   const paid = valid.filter(isPaidOrder);
   const refunded = orders.filter(isRefundedOrder);
-  const cancelled = orders.filter((order) => order.status === 'cancelled' || order.payment_status === 'cancelled' || order.cancelled_at);
+  const cancelled = orders.filter(isCancelledOrder);
   const sales = valid.reduce((sum, order) => sum + getOrderValueCents(order), 0);
   const received = paid.reduce((sum, order) => sum + getOrderValueCents(order), 0);
   const refunds = refunded.reduce((sum, order) => sum + getOrderValueCents(order), 0);

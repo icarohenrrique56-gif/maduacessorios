@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { clearPendingCheckout, getPendingCheckoutRecord } from './checkout-idempotency';
 
 export type OrderStatus =
   | 'pending'
@@ -85,6 +86,8 @@ export type StockMovement = {
   quantity_after: number;
   reason: string | null;
   responsible_user_id: string | null;
+  unit_price_cents: number | null;
+  total_price_cents: number | null;
   created_at: string;
 };
 
@@ -92,17 +95,83 @@ export async function createWhatsAppOrder(input: {
   items: Array<{ product_id: string; quantity: number; variation?: string }>;
   customerName?: string;
   customerPhone?: string;
-  idempotencyKey?: string;
+  idempotencyKey: string;
 }) {
   if (!supabase) throw new Error('Supabase não configurado.');
-  const { data, error } = await supabase.rpc('create_whatsapp_order', {
-    p_items: input.items,
-    p_customer_name: input.customerName ?? null,
-    p_customer_phone: input.customerPhone ?? null,
-    p_idempotency_key: input.idempotencyKey ?? null,
+  const { data, error } = await supabase.functions.invoke('create-whatsapp-order', {
+    body: {
+      items: input.items,
+      customerName: input.customerName ?? null,
+      customerPhone: input.customerPhone ?? null,
+      idempotencyKey: input.idempotencyKey,
+    },
   });
-  if (error) throw new Error(error.message);
+  if (error) {
+    let message = error.message;
+    const response = (error as { context?: unknown }).context;
+    if (response instanceof Response) {
+      try {
+        const payload = await response.clone().json() as { error?: string };
+        if (payload.error) message = payload.error;
+      } catch {
+        // Mantém a mensagem tipada do erro se o corpo não for JSON.
+      }
+    }
+    throw new Error(message);
+  }
+  if (!data || typeof data !== 'object') throw new Error('O checkout não retornou um pedido válido.');
   return data as { id: string; number: string; subtotal_cents: number };
+}
+
+export async function validateCartStock(
+  items: Array<{ product_id: string; quantity: number; variation?: string }>,
+  idempotencyKey?: string | null,
+) {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const signature = JSON.stringify(items.map((item) => ({
+    id: item.product_id,
+    quantity: item.quantity,
+    variation: item.variation ?? null,
+  })));
+  const pendingCheckout = getPendingCheckoutRecord();
+  const ownIdempotencyKey = idempotencyKey
+    ?? (pendingCheckout?.signature === signature ? pendingCheckout.key : undefined);
+  const releaseIdempotencyKey = pendingCheckout && pendingCheckout.signature !== signature
+    ? pendingCheckout.key
+    : undefined;
+  const { data, error } = await supabase.functions.invoke('validate-cart-stock', {
+    body: {
+      items,
+      idempotencyKey: ownIdempotencyKey,
+      releaseIdempotencyKey,
+    },
+  });
+  if (error) {
+    let message = error.message;
+    const response = (error as { context?: unknown }).context;
+    if (response instanceof Response) {
+      try {
+        const payload = await response.clone().json() as { error?: string };
+        if (payload.error) message = payload.error;
+      } catch {
+        // Mantém a mensagem tipada do erro se o corpo não for JSON.
+      }
+    }
+    throw new Error(message);
+  }
+  if (!data || typeof data !== 'object') throw new Error('A verificação de estoque não retornou um resultado válido.');
+  const result = data as {
+    available?: boolean;
+    unavailable_product_ids?: unknown;
+    reservation_release_attempted?: boolean;
+  };
+  if (result.reservation_release_attempted === true) clearPendingCheckout();
+  return {
+    available: result.available === true,
+    unavailableProductIds: Array.isArray(result.unavailable_product_ids)
+      ? result.unavailable_product_ids.filter((id): id is string => typeof id === 'string')
+      : [],
+  };
 }
 
 export async function getOrders(): Promise<Order[]> {
@@ -126,6 +195,7 @@ export async function getOrdersPage(input: {
     .from('orders')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .range(input.from, input.to);
 
   if (input.startDate) query = query.gte('created_at', input.startDate);
@@ -134,6 +204,47 @@ export async function getOrdersPage(input: {
   const { data, count, error } = await query;
   if (error) throw new Error(error.message);
   return { orders: (data ?? []) as Order[], count: count ?? 0 };
+}
+
+export async function collectAllPages<T>(
+  fetchPage: (from: number, to: number) => Promise<{ items: T[]; count: number }>,
+  pageSize = 500,
+): Promise<T[]> {
+  const requestedSize = Number.isFinite(pageSize) ? Math.floor(pageSize) : 500;
+  const size = Math.min(500, Math.max(1, requestedSize));
+  const items: T[] = [];
+  let from = 0;
+  let expectedCount = Number.POSITIVE_INFINITY;
+
+  while (items.length < expectedCount) {
+    const page = await fetchPage(from, from + size - 1);
+    expectedCount = page.count;
+    if (page.items.length === 0) break;
+    items.push(...page.items);
+    from += page.items.length;
+    if (page.items.length < size) break;
+  }
+
+  return items;
+}
+
+export async function getOrdersInRange(input: {
+  startDate: string;
+  endDate: string;
+  pageSize?: number;
+}): Promise<Order[]> {
+  const requestEnd = new Date().toISOString();
+  const endDate = input.endDate < requestEnd ? input.endDate : requestEnd;
+  const orders = await collectAllPages<Order>(async (from, to) => {
+    const page = await getOrdersPage({
+      from,
+      to,
+      startDate: input.startDate,
+      endDate,
+    });
+    return { items: page.orders, count: page.count };
+  }, input.pageSize ?? 500);
+  return orders;
 }
 
 export async function getOrderItems(orderId: string): Promise<OrderItem[]> {
@@ -185,7 +296,7 @@ export async function getStockMovements(): Promise<Array<StockMovement & {
     sku: string | null;
     image: string;
     price_cents: number | null;
-    sale_price_cents: number | null;
+      sale_price_cents: number | null;
   };
 }>> {
   if (!supabase) return [];
@@ -214,6 +325,17 @@ export async function recordQuickSale(input: {
   return data as { id: string; quantity_before: number; quantity_after: number; idempotent: boolean };
 }
 
+export async function getStockMovementByIdempotencyKey(key: string): Promise<StockMovement | null> {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const { data, error } = await supabase
+    .from('stock_movements')
+    .select('*')
+    .eq('idempotency_key', key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as StockMovement | null;
+}
+
 export async function resetStockMovementHistory(): Promise<number> {
   if (!supabase) throw new Error('Supabase não configurado.');
   const { data, error } = await supabase.rpc('reset_stock_movements_history');
@@ -224,6 +346,7 @@ export async function resetStockMovementHistory(): Promise<number> {
 export async function setProductStock(input: {
   productId: string;
   stock: number;
+  expectedStock: number;
   reason?: string;
 }) {
   if (!supabase) throw new Error('Supabase não configurado.');
@@ -231,6 +354,24 @@ export async function setProductStock(input: {
     p_product_id: input.productId,
     p_stock: input.stock,
     p_reason: input.reason ?? null,
+    p_expected_stock: input.expectedStock,
   });
   if (error) throw new Error(error.message);
+}
+
+export async function adjustProductStock(input: {
+  productId: string;
+  delta: number;
+  idempotencyKey: string;
+  reason?: string;
+}) {
+  if (!supabase) throw new Error('Supabase não configurado.');
+  const { data, error } = await supabase.rpc('adjust_product_stock', {
+    p_product_id: input.productId,
+    p_delta: input.delta,
+    p_reason: input.reason ?? null,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) throw new Error(error.message);
+  return data as { id: string; stock: number; quantity_before: number };
 }

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, RefreshCw, Search, WalletCards } from 'lucide-react';
-import { getOrderItemsByIds, getOrdersPage, type Order, type OrderItem } from '../../lib/orders';
+import { getOrderItemsByIds, getOrdersInRange, type Order, type OrderItem } from '../../lib/orders';
 import { formatCurrency } from '../../lib/commerce';
 import {
   getFinanceRange,
   groupDailySales,
+  isCancelledOrder,
   summarizeFinance,
   type FinancePeriod,
 } from '../../lib/finance';
@@ -31,7 +32,8 @@ const orderStatusLabels: Record<string, string> = {
 
 function csvCell(value: string | number) {
   const text = String(value);
-  return `"${text.replace(/"/g, '""')}"`
+  const safeText = typeof value === 'string' && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
 }
 
 export function FinancePage() {
@@ -39,7 +41,6 @@ export function FinancePage() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [orders, setOrders] = useState<Order[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -55,14 +56,11 @@ export function FinancePage() {
     setLoading(true);
     setError('');
     try {
-      const result = await getOrdersPage({
-        from: 0,
-        to: 499,
+      const result = await getOrdersInRange({
         startDate: range.start.toISOString(),
         endDate: range.end.toISOString(),
       });
-      setOrders(result.orders);
-      setTotalCount(result.count);
+      setOrders(result);
       setPage(0);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar os dados financeiros.');
@@ -88,7 +86,7 @@ export function FinancePage() {
         (statusFilter === 'paid' && order.payment_status === 'paid') ||
         (statusFilter === 'pending' && order.payment_status === 'pending') ||
         (statusFilter === 'refunded' && (order.payment_status === 'refunded' || order.returned_at)) ||
-        (statusFilter === 'cancelled' && (order.status === 'cancelled' || order.payment_status === 'cancelled'));
+        (statusFilter === 'cancelled' && isCancelledOrder(order));
       return matchesSearch && matchesStatus;
     });
   }, [orders, search, statusFilter]);
@@ -121,7 +119,7 @@ export function FinancePage() {
     const lines = filteredOrders.map((order) => {
       const isPaid = order.payment_status === 'paid';
       const isRefunded = order.payment_status === 'refunded' || Boolean(order.returned_at);
-      const pending = !isPaid && !isRefunded && order.status !== 'cancelled' ? order.total_cents : 0;
+      const pending = !isPaid && !isRefunded && !isCancelledOrder(order) ? order.total_cents : 0;
       const financialStatus = isRefunded ? 'Reembolsado' : isPaid ? 'Pago' : order.status === 'cancelled' ? 'Cancelado' : 'Pendente';
       return [
         order.number,
@@ -232,7 +230,7 @@ export function FinancePage() {
                   ['Pago', orders.filter((order) => order.payment_status === 'paid').length, '#8B5E7C'],
                   ['Pendente', orders.filter((order) => order.payment_status === 'pending').length, '#D7B0C0'],
                   ['Reembolsado', orders.filter((order) => order.payment_status === 'refunded' || order.returned_at).length, '#B98298'],
-                  ['Cancelado', orders.filter((order) => order.status === 'cancelled' || order.payment_status === 'cancelled').length, '#76506A'],
+                  ['Cancelado', orders.filter(isCancelledOrder).length, '#76506A'],
                 ].map(([label, value, color]) => (
                   <div key={String(label)} className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-2 text-[#5d4454]"><span className="h-2.5 w-2.5 rounded-full" style={{ background: String(color) }} />{label}</span>
@@ -307,12 +305,6 @@ export function FinancePage() {
               </>
             )}
           </section>
-
-          {totalCount > orders.length && (
-            <p className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-              Exibidos os primeiros 500 pedidos do período. {totalCount} registros encontrados; para resultados completos, refine o período.
-            </p>
-          )}
 
           {selected && (
             <aside className="rounded-3xl border border-[#8B5E7C]/30 bg-white p-4 sm:p-5">

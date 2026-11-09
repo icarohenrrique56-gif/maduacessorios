@@ -57,4 +57,26 @@ describe('financial summary', () => {
     expect(result.orderCount).toBe(1);
     expect(result.ticket).toBe(7500);
   });
+
+  it('does not double-classify a refunded order as a cancellation or sale', () => {
+    const result = summarizeFinance([
+      order({
+        status: 'cancelled',
+        payment_status: 'refunded',
+        cancelled_at: '2026-10-31T12:00:00-03:00',
+        returned_at: '2026-10-31T12:05:00-03:00',
+        total_cents: 4200,
+      }),
+      order({
+        status: 'cancelled',
+        payment_status: 'cancelled',
+        cancelled_at: '2026-10-31T12:00:00-03:00',
+        total_cents: 1800,
+      }),
+    ]);
+
+    expect(result.sales).toBe(0);
+    expect(result.cancelledValue).toBe(1800);
+    expect(result.refunds).toBe(4200);
+  });
 });

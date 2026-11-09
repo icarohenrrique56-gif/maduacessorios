@@ -10,6 +10,11 @@ import {
   getCartSummary,
 } from './lib/commerce';
 import {
+  clearPendingCheckout,
+  getCheckoutIdempotencyKey,
+  getExistingCheckoutIdempotencyKey,
+} from './lib/checkout-idempotency';
+import {
   getCategoriesFromSupabase,
   saveCategoryToSupabase,
   deleteCategoryFromSupabase,
@@ -18,6 +23,7 @@ import {
 import {
   getProductsFromSupabase,
   getSupabaseStatus,
+  type StorefrontProduct,
   deleteProductFromSupabase,
   saveProductToSupabase,
   updateProductInSupabase,
@@ -32,7 +38,7 @@ import {
   validateProductImageFile,
   validateProductForm,
 } from './lib/products';
-import { useCart } from './context/CartContext';
+import { getCartStockIssueIds, useCart } from './context/CartContext';
 import { MaduSidebar } from './components/Navigation/MaduSidebar';
 import type { AdminPageId } from './components/Navigation/MaduSidebar';
 import { useAdminAuth } from './context/AdminAuthContext';
@@ -42,10 +48,19 @@ import maduLogo from './assets/madu-logo-transparent.png';
 import { useStoreSettings } from './context/StoreSettingsContext';
 import { normalizeWhatsAppNumber, WHATSAPP_COMPATIBLE_EMOJIS } from './lib/storeSettings';
 import { OfflineNotice, PurchaseGuide, PwaInstallButton, StoreBottomNavigation, VersionUpdateNotice } from './components/PWA/PwaControls';
-import { createWhatsAppOrder } from './lib/orders';
+import { createWhatsAppOrder, validateCartStock } from './lib/orders';
 import { trackStorefrontEvent } from './lib/analytics';
 
 type ProductView = Product;
+type ProductCatalogState<T> = {
+  catalog: T[];
+  syncStatus: string;
+  isLoading: boolean;
+  loadError: boolean;
+  refreshCatalog: () => Promise<T[] | null>;
+  addConfirmedProduct: (product: ProductView) => void;
+  removeConfirmedProduct: (productId: string) => void;
+};
 
 const AdminLoginPage = lazy(() =>
   import('./pages/AdminLoginPage').then((module) => ({ default: module.AdminLoginPage })),
@@ -66,10 +81,10 @@ const DashboardPage = lazy(() =>
   import('./components/Admin/DashboardPage').then((module) => ({ default: module.DashboardPage })),
 );
 
-function useStorefrontProducts(includeInactive = false) {
-  const [catalog, setCatalog] = useState<ProductView[]>(
-    () => [],
-  );
+function useStorefrontProducts(includeInactive: true): ProductCatalogState<Product>;
+function useStorefrontProducts(includeInactive?: false): ProductCatalogState<StorefrontProduct>;
+function useStorefrontProducts(includeInactive = false): ProductCatalogState<Product | StorefrontProduct> {
+  const [catalog, setCatalog] = useState<Array<Product | StorefrontProduct>>([]);
   const [syncStatus, setSyncStatus] = useState('Carregando catálogo...');
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -82,7 +97,9 @@ function useStorefrontProducts(includeInactive = false) {
       if (!status.enabled) {
         throw new Error(status.message);
       }
-      const remoteProducts = await getProductsFromSupabase(includeInactive);
+      const remoteProducts = includeInactive
+        ? await getProductsFromSupabase(true)
+        : await getProductsFromSupabase(false);
       setCatalog(remoteProducts);
       setSyncStatus(getSupabaseStatus().message);
       setIsLoading(false);
@@ -118,20 +135,19 @@ function useStorefrontProducts(includeInactive = false) {
   };
 }
 
-function useCatalogCategories() {
-  const [categories, setCategories] = useState<string[]>([]);
+function useCatalogCategories(includeInactive = false) {
+  const [categories, setCategories] = useState<Category[]>([]);
 
   const refreshCategories = useCallback(async () => {
     try {
-      const remote = await getCategoriesFromSupabase(true);
-      const names = remote.map((category) => category.name);
-      setCategories(names);
+      const remote = await getCategoriesFromSupabase(includeInactive);
+      setCategories(remote);
       return remote;
     } catch {
       setCategories([]);
       return [] as Category[];
     }
-  }, []);
+  }, [includeInactive]);
 
   useEffect(() => {
     void refreshCategories();
@@ -210,7 +226,7 @@ function HomePage() {
   const homeProducts = featured.length > 0 ? featured : catalog.slice(0, 6);
   const heroProduct = homeProducts.find((product) => product.image) ?? null;
   const realCategories = categories.length > 0
-    ? categories
+    ? categories.map((category) => category.name)
     : [...new Set(catalog.map((product) => product.category).filter(Boolean))];
   const promotions = catalog.filter((product) =>
     product.is_active !== false &&
@@ -372,6 +388,10 @@ function CatalogPage() {
   const { categories } = useCatalogCategories();
   const { whatsappNumber } = useStoreSettings();
   const [searchParams] = useSearchParams();
+  const querySearch = searchParams.get('q') ?? '';
+  const queryCategory = searchParams.get('categoria') ?? 'Todas';
+  const querySort = searchParams.get('ordenar') ?? 'news';
+  const queryAvailable = searchParams.get('disponivel') === '1';
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
   const [category, setCategory] = useState(searchParams.get('categoria') ?? 'Todas');
   const [sort, setSort] = useState(searchParams.get('ordenar') ?? 'news');
@@ -380,11 +400,18 @@ function CatalogPage() {
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
   const realCategories = categories.length > 0
-    ? categories
+    ? categories.map((category) => category.name)
     : [...new Set(catalog.map((product) => product.category).filter(Boolean))];
   const realVariations = useMemo(() =>
     [...new Set(catalog.flatMap((product) => product.variations ?? []).filter(Boolean))],
   [catalog]);
+
+  useEffect(() => {
+    setSearch(querySearch);
+    setCategory(queryCategory);
+    setSort(querySort);
+    setAvailableOnly(queryAvailable);
+  }, [querySearch, queryCategory, querySort, queryAvailable]);
 
   const filteredProducts = useMemo(() => {
     const byText = catalog.filter((product) => {
@@ -392,14 +419,13 @@ function CatalogPage() {
       return (
         !term ||
         product.name.toLowerCase().includes(term) ||
-        product.description.toLowerCase().includes(term) ||
-        (product.sku ?? '').toLowerCase().includes(term)
+        product.description.toLowerCase().includes(term)
       );
     });
 
     const byCategory = category === 'Todas' ? byText : byText.filter((product) => product.category === category);
     const byVariation = variation === 'Todas' ? byCategory : byCategory.filter((product) => product.variations?.includes(variation));
-    const byAvailability = availableOnly ? byVariation.filter((product) => product.stock > 0) : byVariation;
+    const byAvailability = availableOnly ? byVariation.filter((product) => product.is_available) : byVariation;
     const min = minPrice.trim() ? Number(minPrice) * 100 : 0;
     const max = maxPrice.trim() ? Number(maxPrice) * 100 : Number.POSITIVE_INFINITY;
     const byPrice = byAvailability.filter((product) => {
@@ -437,7 +463,7 @@ function CatalogPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nome, descrição ou SKU..."
+              placeholder="Buscar por nome ou descrição..."
               className="w-full rounded-full border border-[#efd7e7] bg-[#fffafc] py-3 pl-10 pr-4 text-sm outline-none ring-0 placeholder:text-[#9c7d8d]"
             />
           </div>
@@ -518,7 +544,13 @@ function ProductPage() {
   const product = catalog.find((item) => item.slug === slug);
   const [selectedVariation, setSelectedVariation] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const { addToCart } = useCart();
+  const [stockCheckMessage, setStockCheckMessage] = useState('');
+  const [isStockCheckBusy, setIsStockCheckBusy] = useState(false);
+  const { addToCart, items: cartItems } = useCart();
+  const existingProductQuantity = cartItems
+    .filter((item) => item.id === product?.id)
+    .reduce((sum, item) => sum + item.quantity, 0);
+  const maxAdditionalQuantity = Math.max(0, 25 - existingProductQuantity);
 
   useEffect(() => {
     setSelectedVariation(product?.variations?.[0] ?? '');
@@ -549,13 +581,12 @@ function ProductPage() {
       name: product.name,
       description: product.description,
       image: product.image ? [product.image] : undefined,
-      sku: product.sku || undefined,
       brand: { '@type': 'Brand', name: 'MADU Acessórios' },
       offers: {
         '@type': 'Offer',
         priceCurrency: 'BRL',
         price: ((product.sale_price_cents ?? product.price_cents) / 100).toFixed(2),
-        availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+        availability: product.is_available ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
         url: window.location.href,
       },
     });
@@ -573,6 +604,41 @@ function ProductPage() {
         .concat(catalog.filter((item) => item.id !== product.id && item.category !== product.category))
         .slice(0, 3)
     : [];
+
+  async function handleAddToCart() {
+    if (!product || !product.is_available || isStockCheckBusy) return;
+    setIsStockCheckBusy(true);
+    setStockCheckMessage('');
+    try {
+      const validation = await validateCartStock([
+        ...cartItems.map((item) => ({
+          product_id: item.id,
+          quantity: item.quantity,
+          variation: item.variation,
+        })),
+        { product_id: product.id, quantity, variation: selectedVariation || undefined },
+      ]);
+      if (!validation.available) {
+        setStockCheckMessage('O estoque mudou enquanto você escolhia. Revise o carrinho e tente novamente.');
+        return;
+      }
+      addToCart({
+        id: product.id,
+        name: product.name,
+        image: product.image,
+        unitPrice: product.sale_price_cents ?? product.price_cents,
+        variation: selectedVariation,
+        sku: undefined,
+        availableStock: undefined,
+        quantity,
+      });
+      void trackStorefrontEvent('add_to_cart', { productId: product.id });
+    } catch (error) {
+      setStockCheckMessage(error instanceof Error ? error.message : 'Não foi possível validar o estoque. Tente novamente.');
+    } finally {
+      setIsStockCheckBusy(false);
+    }
+  }
 
   if (!product && isLoading) {
     return (
@@ -622,8 +688,8 @@ function ProductPage() {
           <div className="flex flex-col justify-center">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8B5E7C]">{product.category}</p>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${product.stock > 0 ? 'bg-[#edf2e8] text-[#5f7049]' : 'bg-[#f7e8ec] text-[#955a69]'}`}>
-                {product.stock > 0 ? `${product.stock} disponíveis` : 'Esgotado'}
+              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${product.is_available ? 'bg-[#edf2e8] text-[#5f7049]' : 'bg-[#f7e8ec] text-[#955a69]'}`}>
+                {product.is_available ? 'Disponível' : 'Esgotado'}
               </span>
             </div>
             <h1 className="mt-3 text-3xl font-semibold text-[#2d1d25]">{product.name}</h1>
@@ -686,24 +752,23 @@ function ProductPage() {
                   <Minus size={16} />
                 </button>
                 <span className="min-w-10 text-center text-sm font-medium text-[#2d1d25]">{quantity}</span>
-                <button type="button" disabled={quantity >= product.stock} onClick={() => setQuantity((value) => Math.min(product.stock, value + 1))} className="inline-flex min-h-11 min-w-11 items-center justify-center p-3 text-[#8B5E7C] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aumentar quantidade">
+                <button type="button" disabled={quantity >= maxAdditionalQuantity} onClick={() => setQuantity((value) => Math.min(maxAdditionalQuantity, value + 1))} className="inline-flex min-h-11 min-w-11 items-center justify-center p-3 text-[#8B5E7C] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aumentar quantidade">
                   <Plus size={16} />
                 </button>
               </div>
               <button
                 type="button"
-                disabled={product.stock < 1}
-                onClick={() => {
-                  addToCart({ id: product.id, name: product.name, image: product.image, unitPrice: product.sale_price_cents ?? product.price_cents, variation: selectedVariation, sku: product.sku, availableStock: product.stock, quantity });
-                  void trackStorefrontEvent('add_to_cart', { productId: product.id });
-                }}
+                disabled={!product.is_available || isStockCheckBusy || existingProductQuantity + quantity > 25}
+                onClick={() => void handleAddToCart()}
                 className="flex-1 rounded-full bg-[#8B5E7C] px-4 py-3 text-sm font-medium text-white shadow-md transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {product.stock > 0 ? 'Adicionar ao carrinho' : 'Indisponível'}
+                {isStockCheckBusy ? 'Verificando estoque...' : product.is_available ? 'Adicionar ao carrinho' : 'Indisponível'}
               </button>
             </div>
 
-            {product.stock > 0 && whatsappNumber && (
+            {stockCheckMessage && <p role="alert" className="mt-3 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">{stockCheckMessage}</p>}
+
+            {product.is_available && whatsappNumber && (
               <a
                 href={buildWhatsAppUrl(whatsappNumber, `Olá! Vi a peça ${product.name}${selectedVariation ? ` (${selectedVariation})` : ''} no site da MADU e gostaria de saber se ainda está disponível.`)}
                 target="_blank"
@@ -716,8 +781,8 @@ function ProductPage() {
             )}
 
             <div className="mt-5 grid gap-2 text-sm text-[#5d4454]">
-              <p>SKU: {product.sku ?? 'Não informado'}</p>
-              <p>Disponibilidade: {product.stock > 0 ? `${product.stock} disponíveis` : 'Indisponível'}</p>
+              <p>Código interno: protegido</p>
+              <p>Disponibilidade: {product.is_available ? 'Disponível' : 'Indisponível'}</p>
             </div>
           </div>
         </div>
@@ -747,6 +812,9 @@ function CartPage() {
   } = useStoreSettings();
   const [checkoutError, setCheckoutError] = useState('');
   const [isCheckoutStarting, setIsCheckoutStarting] = useState(false);
+  const [isCartStockChecking, setIsCartStockChecking] = useState(false);
+  const [stockValidationError, setStockValidationError] = useState('');
+  const [serverUnavailableProductIds, setServerUnavailableProductIds] = useState<string[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const pendingOrderRef = useRef<{ id: string; number: string; subtotal_cents: number } | null>(null);
@@ -755,28 +823,69 @@ function CartPage() {
   const idempotencyKeyRef = useRef('');
   const productsById = useMemo(() => new Map(catalog.map((product) => [product.id, product])), [catalog]);
   const cartItems = useMemo(() => items.map((item) => {
+    const { sku: _sku, availableStock: _availableStock, ...publicItem } = item;
     const product = productsById.get(item.id);
     return product
       ? {
-          ...item,
+          ...publicItem,
           name: product.name,
           image: product.image,
           unitPrice: product.sale_price_cents ?? product.price_cents,
-          sku: product.sku,
-          availableStock: product.stock,
         }
-      : item;
+      : publicItem;
   }), [items, productsById]);
 
   useEffect(() => {
     if (!catalogLoading && !catalogError) refreshFromCatalog(catalog);
   }, [catalog, catalogError, catalogLoading, refreshFromCatalog]);
 
+  useEffect(() => {
+    let active = true;
+    if (cartItems.length === 0 || catalogLoading || catalogError) {
+      setServerUnavailableProductIds([]);
+      setStockValidationError('');
+      setIsCartStockChecking(false);
+      return () => { active = false; };
+    }
+    setIsCartStockChecking(true);
+    setStockValidationError('');
+    const currentSignature = JSON.stringify(cartItems.map((item) => ({
+      id: item.id,
+      quantity: item.quantity,
+      variation: item.variation ?? null,
+    })));
+    void validateCartStock(cartItems.map((item) => ({
+      product_id: item.id,
+      quantity: item.quantity,
+      variation: item.variation,
+    })), getExistingCheckoutIdempotencyKey(currentSignature))
+      .then((result) => {
+        if (active) setServerUnavailableProductIds(result.unavailableProductIds);
+      })
+      .catch((error) => {
+        if (active) {
+          setStockValidationError(error instanceof Error ? error.message : 'Não foi possível verificar o estoque.');
+        }
+      })
+      .finally(() => {
+        if (active) setIsCartStockChecking(false);
+      });
+    return () => { active = false; };
+  }, [cartItems, catalogError, catalogLoading]);
+
   const summary = getCartSummary(cartItems.map((item) => ({ quantity: item.quantity, unitPrice: item.unitPrice })));
-  const unavailableItems = cartItems.filter((item) => {
-    const currentProduct = productsById.get(item.id);
-    return !currentProduct || item.quantity > currentProduct.stock;
-  });
+  const cartQuantityByProduct = useMemo(() => {
+    const quantities = new Map<string, number>();
+    for (const item of cartItems) {
+      quantities.set(item.id, (quantities.get(item.id) ?? 0) + item.quantity);
+    }
+    return quantities;
+  }, [cartItems]);
+  const unavailableProductIds = useMemo(() => new Set([
+    ...getCartStockIssueIds(cartItems, catalog),
+    ...serverUnavailableProductIds,
+  ]), [cartItems, catalog, serverUnavailableProductIds]);
+  const unavailableItems = cartItems.filter((item) => unavailableProductIds.has(item.id));
   const canCheckout = Boolean(
     items.length > 0 &&
     whatsappNumber &&
@@ -784,6 +893,7 @@ function CartPage() {
     !settingsError &&
     !catalogLoading &&
     !catalogError &&
+    !isCartStockChecking &&
     unavailableItems.length === 0,
   );
 
@@ -801,13 +911,22 @@ function CartPage() {
     setIsCheckoutStarting(true);
     setCheckoutError('');
     try {
+      if (cartItems.length > 30) throw new Error('O carrinho pode ter no máximo 30 linhas de produtos.');
       if (idempotencySignatureRef.current !== orderSignature) {
         idempotencySignatureRef.current = orderSignature;
-        idempotencyKeyRef.current = typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        idempotencyKeyRef.current = getCheckoutIdempotencyKey(orderSignature);
         pendingOrderRef.current = null;
         pendingOrderPromiseRef.current = null;
+      }
+      setIsCartStockChecking(true);
+      const stockCheck = await validateCartStock(cartItems.map((item) => ({
+        product_id: item.id,
+        quantity: item.quantity,
+        variation: item.variation,
+      })), idempotencyKeyRef.current);
+      setServerUnavailableProductIds(stockCheck.unavailableProductIds);
+      if (!stockCheck.available) {
+        throw new Error('O estoque mudou. Revise os itens indisponíveis no carrinho antes de continuar.');
       }
       const orderItems = cartItems.map((item) => ({
         id: item.id,
@@ -815,7 +934,6 @@ function CartPage() {
         unitPrice: item.unitPrice,
         name: item.name,
         variation: item.variation,
-        sku: item.sku,
         link: `${window.location.origin}/produto/${catalog.find((product) => product.id === item.id)?.slug ?? item.id}`,
       }));
 
@@ -847,11 +965,78 @@ function CartPage() {
       });
       void trackStorefrontEvent('whatsapp_checkout');
       performance.measure('madu:checkout-to-whatsapp', 'madu:checkout-click');
-      window.location.assign(buildWhatsAppUrl(whatsappNumber, message));
+      const whatsappUrl = buildWhatsAppUrl(whatsappNumber, message);
+      window.location.assign(whatsappUrl);
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : 'Não foi possível iniciar o pedido.');
+      pendingOrderPromiseRef.current = null;
+      const message = error instanceof Error ? error.message : 'Não foi possível iniciar o pedido.';
+      if (/reserva.*expirou|pedido.*processado/i.test(message)) {
+        clearPendingCheckout();
+        idempotencySignatureRef.current = '';
+        idempotencyKeyRef.current = '';
+        pendingOrderRef.current = null;
+        pendingOrderPromiseRef.current = null;
+      }
+      setCheckoutError(message);
     } finally {
+      setIsCartStockChecking(false);
       setIsCheckoutStarting(false);
+    }
+  }
+
+  async function handleCartQuantityChange(item: (typeof cartItems)[number], quantity: number) {
+    if (quantity <= item.quantity) {
+      updateQuantity(item.id, item.variation, quantity);
+      return;
+    }
+    const otherProductQuantity = (cartQuantityByProduct.get(item.id) ?? 0) - item.quantity;
+    if (otherProductQuantity + quantity > 25) {
+      setStockValidationError('O carrinho aceita no máximo 25 unidades do mesmo produto.');
+      return;
+    }
+    setIsCartStockChecking(true);
+    setStockValidationError('');
+    try {
+      const candidate = cartItems.map((line) => (
+        line.id === item.id && line.variation === item.variation ? { ...line, quantity } : line
+      ));
+      const result = await validateCartStock(candidate.map((line) => ({
+        product_id: line.id,
+        quantity: line.quantity,
+        variation: line.variation,
+      })), getExistingCheckoutIdempotencyKey(JSON.stringify(candidate.map((line) => ({
+        id: line.id,
+        quantity: line.quantity,
+        variation: line.variation ?? null,
+      })))));
+      setServerUnavailableProductIds(result.unavailableProductIds);
+      if (!result.available) {
+        setStockValidationError('Essa quantidade não está disponível no estoque atual.');
+        return;
+      }
+      updateQuantity(item.id, item.variation, quantity);
+    } catch (error) {
+      setStockValidationError(error instanceof Error ? error.message : 'Não foi possível verificar o estoque.');
+    } finally {
+      setIsCartStockChecking(false);
+    }
+  }
+
+  async function handleRecheckCartStock() {
+    if (cartItems.length === 0 || isCartStockChecking) return;
+    setIsCartStockChecking(true);
+    setStockValidationError('');
+    try {
+      const result = await validateCartStock(cartItems.map((item) => ({
+        product_id: item.id,
+        quantity: item.quantity,
+        variation: item.variation,
+      })), getExistingCheckoutIdempotencyKey(orderSignature));
+      setServerUnavailableProductIds(result.unavailableProductIds);
+    } catch (error) {
+      setStockValidationError(error instanceof Error ? error.message : 'Não foi possível verificar o estoque.');
+    } finally {
+      setIsCartStockChecking(false);
     }
   }
 
@@ -888,11 +1073,11 @@ function CartPage() {
                     </div>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center overflow-hidden rounded-full border border-[#efd7e7] bg-[#fffafc]">
-                            <button type="button" onClick={() => updateQuantity(item.id, item.variation, item.quantity - 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-2 text-[#8B5E7C]" aria-label="Diminuir quantidade">
+                        <button type="button" onClick={() => void handleCartQuantityChange(item, item.quantity - 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-2 text-[#8B5E7C]" aria-label="Diminuir quantidade">
                           <Minus size={14} />
                         </button>
                         <span className="min-w-8 text-center text-sm font-medium text-[#2d1d25]">{item.quantity}</span>
-                        <button type="button" disabled={item.availableStock !== undefined && item.quantity >= item.availableStock} onClick={() => updateQuantity(item.id, item.variation, item.quantity + 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-2 text-[#8B5E7C] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aumentar quantidade">
+                        <button type="button" disabled={isCartStockChecking || (cartQuantityByProduct.get(item.id) ?? 0) >= 25} onClick={() => void handleCartQuantityChange(item, item.quantity + 1)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-2 text-[#8B5E7C] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aumentar quantidade">
                           <Plus size={14} />
                         </button>
                       </div>
@@ -934,10 +1119,14 @@ function CartPage() {
                 />
               </div>
               {unavailableItems.length > 0 && (
-              <p role="alert" className="mt-4 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
-                Revise os itens indisponíveis ou ajuste a quantidade ao estoque atual antes de continuar.
-              </p>
+                <div role="alert" className="mt-4 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
+                  <p>Revise os itens indisponíveis ou ajuste a quantidade ao estoque atual antes de continuar.</p>
+                  <button type="button" onClick={() => void handleRecheckCartStock()} disabled={isCartStockChecking} className="mt-2 font-semibold underline disabled:opacity-50">
+                    {isCartStockChecking ? 'Verificando...' : 'Verificar estoque novamente'}
+                  </button>
+                </div>
               )}
+              {stockValidationError && <p role="alert" className="mt-4 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">{stockValidationError} Você pode tentar novamente pelo botão de finalizar.</p>}
               {catalogError && <p role="alert" className="mt-4 text-sm text-red-700">{catalogError}</p>}
               {settingsError && <p role="alert" className="mt-4 text-sm text-red-700">{settingsError}</p>}
               {checkoutError && <p role="alert" className="mt-4 rounded-2xl bg-rose-50 p-3 text-sm text-rose-900">{checkoutError}</p>}
@@ -955,7 +1144,7 @@ function CartPage() {
                 {isCheckoutStarting ? 'Preparando pedido...' : 'Finalizar pedido pelo WhatsApp'}
               </button>
               <p className="mt-3 text-center text-xs leading-5 text-[#76506a]">
-                Seu pedido será enviado pelo WhatsApp. Confirmaremos a disponibilidade, o pagamento e a entrega com você.
+                Ao gerar o pedido, os itens disponíveis ficam reservados por até 30 minutos. A loja confirma pelo WhatsApp o pedido, o pagamento e a entrega.
               </p>
               </>
               ) : (
@@ -964,7 +1153,7 @@ function CartPage() {
                 disabled
                 className="mt-6 inline-flex w-full cursor-not-allowed items-center justify-center rounded-full bg-[#8B5E7C]/50 px-5 py-3 text-sm font-medium text-white"
               >
-                {catalogLoading || settingsLoading ? 'Verificando dados do pedido...' : 'WhatsApp indisponível'}
+                {catalogLoading || settingsLoading || isCartStockChecking ? 'Verificando dados do pedido...' : unavailableItems.length > 0 ? 'Revise o estoque do carrinho' : 'WhatsApp indisponível'}
               </button>
               )}
             </aside>
@@ -980,7 +1169,7 @@ function AdminPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { signOut, role } = useAdminAuth();
-  const { categories } = useCatalogCategories();
+  const { categories } = useCatalogCategories(true);
   const isAdmin = role === 'admin';
   const {
     catalog,
@@ -1465,7 +1654,7 @@ function AdminPage() {
                       Categoria *
                       <select required value={productForm.category} onChange={(event) => updateProductForm('category', event.target.value)} aria-invalid={Boolean(formErrors.category)} className="mt-1 w-full rounded-2xl border border-[#efd7e7] bg-[#fffafc] px-3 py-2 text-[#2d1d25] outline-none">
                         <option value="">Selecione uma categoria</option>
-                        {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                        {categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
                       </select>
                       {formErrors.category && <span className="mt-1 block text-xs text-red-700">{formErrors.category}</span>}
                     </label>
@@ -1719,7 +1908,7 @@ function AdminModulePage() {
   const { module = '' } = useParams();
   const navigate = useNavigate();
   const { signOut, role } = useAdminAuth();
-  const { categories } = useCatalogCategories();
+  const { categories, refreshCategories } = useCatalogCategories(true);
   const { catalog, syncStatus } = useStorefrontProducts(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [message, setMessage] = useState('');
@@ -1791,7 +1980,7 @@ function AdminModulePage() {
 
       setNewCategoryName('');
       setCategoryMessage(`Categoria "${result.category.name}" adicionada ao catálogo.`);
-      const refreshed = await getCategoriesFromSupabase(true);
+      const refreshed = await refreshCategories();
       if (refreshed.length > 0) {
         setCategoryMessage(`Categoria "${result.category.name}" adicionada e sincronizada.`);
       }
@@ -1802,21 +1991,21 @@ function AdminModulePage() {
     }
   }
 
-  async function handleDeleteCategory(categoryName: string) {
-    if (!window.confirm(`Remover a categoria "${categoryName}"? Produtos vinculados continuam disponíveis, mas o item deixa de aparecer na vitrine.`)) {
+  async function handleDeleteCategory(category: Category) {
+    if (!window.confirm(`Remover a categoria "${category.name}"? Produtos vinculados continuam disponíveis, mas o item deixa de aparecer na vitrine.`)) {
       return;
     }
 
     try {
-      const match = defaultCategories.find((item) => item.name === categoryName);
-      const result = await deleteCategoryFromSupabase(match?.id ?? categoryName);
+      const result = await deleteCategoryFromSupabase(category.id);
       if (!result.ok) {
         setCategoryError(result.reason);
         return;
       }
-      setCategoryMessage(`Categoria "${categoryName}" removida.`);
+      setCategoryMessage(`Categoria "${category.name}" removida.`);
       setCategoryError('');
       setNewCategoryName('');
+      await refreshCategories();
     } catch (error) {
       setCategoryError(error instanceof Error ? error.message : 'Não foi possível remover a categoria.');
     }
@@ -1932,13 +2121,13 @@ function AdminModulePage() {
               {categoryMessage && <p role="status" className="mb-3 text-sm text-[#5d4454]">{categoryMessage}</p>}
               {categoryError && <p role="alert" className="mb-3 text-sm text-red-700">{categoryError}</p>}
               <ul className="flex flex-wrap gap-2">{categories.map((category) => (
-                <li key={category} className="inline-flex items-center gap-2 rounded-full bg-[#f8e9ef] px-3 py-2 text-sm text-[#5d4454]">
-                  <span>{category}</span>
+                <li key={category.id} className="inline-flex items-center gap-2 rounded-full bg-[#f8e9ef] px-3 py-2 text-sm text-[#5d4454]">
+                  <span>{category.name}</span>
                   <button
                     type="button"
                     onClick={() => void handleDeleteCategory(category)}
                     className="text-xs font-medium text-[#8B5E7C]"
-                    aria-label={`Remover categoria ${category}`}
+                    aria-label={`Remover categoria ${category.name}`}
                   >
                     Remover
                   </button>
@@ -1968,7 +2157,7 @@ function AdminModulePage() {
   );
 }
 
-function ProductCard({ product }: { product: ProductView }) {
+function ProductCard({ product }: { product: StorefrontProduct }) {
   const { whatsappNumber } = useStoreSettings();
   const discountPercentage = product.sale_price_cents !== undefined && product.sale_price_cents < product.price_cents
     ? Math.round((1 - product.sale_price_cents / product.price_cents) * 100)
@@ -1983,7 +2172,7 @@ function ProductCard({ product }: { product: ProductView }) {
             -{discountPercentage}%
           </span>
         )}
-        {product.stock < 1 && (
+        {!product.is_available && (
           <span className="absolute bottom-2 right-2 rounded-full bg-[#fffafc]/95 px-2.5 py-1 text-[10px] font-semibold text-[#8B5E7C] shadow-sm">
             Esgotado
           </span>
@@ -1999,10 +2188,10 @@ function ProductCard({ product }: { product: ProductView }) {
           <span className="text-sm font-semibold text-[#2d1d25] sm:text-lg">{formatCurrency(product.sale_price_cents ?? product.price_cents)}</span>
           {product.sale_price_cents !== undefined ? <span className="text-sm text-[#9c7d8d] line-through">{formatCurrency(product.price_cents)}</span> : null}
         </div>
-        <p className={`mt-2 text-xs font-medium ${product.stock > 0 ? 'text-[#6f7b58]' : 'text-[#a15b67]'}`}>
-          {product.stock > 0 ? `${product.stock} disponível${product.stock === 1 ? '' : 's'}` : 'Indisponível'}
+        <p className={`mt-2 text-xs font-medium ${product.is_available ? 'text-[#6f7b58]' : 'text-[#a15b67]'}`}>
+          {product.is_available ? 'Disponível' : 'Indisponível'}
         </p>
-        {product.stock > 0 && whatsappNumber && (
+        {product.is_available && whatsappNumber && (
           <a
             href={buildWhatsAppUrl(whatsappNumber, `Olá! Vi a peça ${product.name} no site da MADU e gostaria de saber se ainda está disponível.`)}
             target="_blank"
